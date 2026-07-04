@@ -23,14 +23,20 @@ def set_session_cookie(
 ) -> None:
     """Attach the panel session cookie with consistent, safe attributes.
 
-    Secure is set when the request itself arrived over HTTPS (uvicorn runs with
-    --proxy-headers, so X-Forwarded-Proto from a TLS-terminating proxy is
-    honoured) OR when WEB_PANEL_URL says the panel is HTTPS — whichever signal
-    is available. Local plain-http development still works. The lifetime tracks
-    the JWT expiry.
+    Secure is decided by the COOKIE_SECURE setting: "true"/"false" force it;
+    "auto" (default) sets it only when the request ACTUALLY arrived over HTTPS.
+    uvicorn runs with --proxy-headers/--forwarded-allow-ips='*', so
+    request.url.scheme is "https" exactly when a TLS-terminating proxy forwards
+    X-Forwarded-Proto=https; a panel served over plain http gets a non-Secure
+    cookie and login keeps working. The lifetime tracks the JWT expiry.
     """
-    request_is_https = request is not None and request.url.scheme == "https"
-    secure = request_is_https or settings.WEB_PANEL_URL.lower().startswith("https")
+    mode = (settings.COOKIE_SECURE or "auto").strip().lower()
+    if mode == "true":
+        secure = True
+    elif mode == "false":
+        secure = False
+    else:  # auto
+        secure = request is not None and request.url.scheme == "https"
     response.set_cookie(
         COOKIE_NAME,
         token,

@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_ADMIN_ID: int | None = None
 
+    # --- Session cookie ---
+    # "auto" (default): Secure only when the request actually arrived over HTTPS
+    # (via TLS termination + X-Forwarded-Proto). "true"/"false" force it.
+    COOKIE_SECURE: str = "auto"
+
     # --- JWT tuning (not required in .env) ---
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 12

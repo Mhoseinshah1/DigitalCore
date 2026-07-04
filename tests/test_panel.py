@@ -113,10 +113,13 @@ async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_clien
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
-    assert r.status_code == 302
+    assert r.status_code == 302 and r.headers["location"] == "/"
     set_cookie = r.headers.get("set-cookie", "")
     assert "dc_session=" in set_cookie
     assert "httponly" in set_cookie.lower()
+    # Plain-HTTP request => the cookie must NOT be Secure, or the browser drops
+    # it and every post-login request bounces back to /login.
+    assert "secure" not in set_cookie.lower()
 
     panel_client.cookies.set("dc_lang", "en")
     r = await panel_client.get("/")
@@ -130,6 +133,47 @@ async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_clien
     r = await panel_client.get("/")
     assert r.status_code == 200
     assert "داشبورد" in r.text and 'dir="rtl"' in r.text
+
+
+async def test_cookie_not_secure_even_when_panel_url_is_https(panel_client, monkeypatch) -> None:
+    """Regression: WEB_PANEL_URL=https://… must NOT force Secure on plain HTTP.
+
+    The installer writes an https WEB_PANEL_URL while the panel is still served
+    over http://host:8000; deciding Secure from that URL made the browser drop
+    the cookie and login looped for any credentials.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "WEB_PANEL_URL", "https://panel.example.com")
+    monkeypatch.setattr(settings, "COOKIE_SECURE", "auto")
+    r = await panel_client.post(
+        "/login",
+        data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "dc_session=" in set_cookie
+    assert "secure" not in set_cookie.lower()
+
+    # The follow-up request with that cookie reaches the dashboard (no loop).
+    r = await panel_client.get("/", follow_redirects=False)
+    assert r.status_code == 200
+
+
+async def test_cookie_secure_forced_true_override(panel_client, monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COOKIE_SECURE", "true")
+    r = await panel_client.post(
+        "/login",
+        data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "dc_session=" in set_cookie
+    assert "secure" in set_cookie.lower()
 
 
 async def test_form_login_by_email_identifier_also_works(panel_client) -> None:
