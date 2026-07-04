@@ -29,13 +29,17 @@ def verify_password(password: str, password_hash: str | None) -> bool:
         return False
 
 
-def create_access_token(subject: str | int, *, email: str | None = None) -> str:
+def create_access_token(
+    subject: str | int, *, username: str | None = None, email: str | None = None
+) -> str:
     now = datetime.now(timezone.utc)
     payload: dict = {
         "sub": str(subject),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)).timestamp()),
     }
+    if username is not None:
+        payload["username"] = username
     if email is not None:
         payload["email"] = email
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)

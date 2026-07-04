@@ -9,11 +9,12 @@
 # Fully non-interactive (CI / automation) — pass values as environment vars:
 #
 #     curl -fsSL .../install.sh | sudo BOT_TOKEN=123:abc MAIN_ADMIN_TELEGRAM_ID=111 \
-#         DOMAIN=panel.example.com NON_INTERACTIVE=1 bash
+#         DOMAIN=panel.example.com ADMIN_USERNAME=admin NON_INTERACTIVE=1 bash
 #
-# The installer asks ONLY for: BOT_TOKEN, MAIN_ADMIN_TELEGRAM_ID, DOMAIN, and an
-# optional web-admin password. Everything else (card numbers, prices, products,
-# 3X-UI servers, texts, …) is configured later from the admin panel.
+# The installer asks ONLY for: BOT_TOKEN, MAIN_ADMIN_TELEGRAM_ID, DOMAIN, the
+# admin username (default "admin"), and an optional web-admin password.
+# Everything else (card numbers, prices, products, 3X-UI servers, texts, …) is
+# configured later from the admin panel.
 #
 # It installs Docker if missing, clones the repo to /opt/digitalcore, generates
 # all secrets, brings the stack up, migrates, creates the admin, and verifies
@@ -168,7 +169,8 @@ cd "$INSTALL_DIR"
 # --- 4. .env -----------------------------------------------------------------
 if [ -f .env ]; then
     ok "Existing .env found — keeping it (secrets are preserved). Edit it by hand to change values."
-    ADMIN_EMAIL_OUT="$(grep -E '^ADMIN_EMAIL=' .env | cut -d= -f2- || true)"
+    ADMIN_USERNAME_OUT="$(grep -E '^ADMIN_USERNAME=' .env | cut -d= -f2- || true)"
+    ADMIN_USERNAME_OUT="${ADMIN_USERNAME_OUT:-admin}"
     ADMIN_PW_OUT="(unchanged — see your existing .env)"
 else
     cp .env.example .env
@@ -178,6 +180,7 @@ else
     ask BOT_TOKEN                "Telegram BOT_TOKEN (optional):"        ""
     ask MAIN_ADMIN_TELEGRAM_ID   "Main admin Telegram numeric ID:"       ""
     ask DOMAIN                   "Web panel domain (optional):"          ""
+    ask ADMIN_USERNAME           "Admin username:"                       "admin"
     ask WEB_ADMIN_PASSWORD       "Web admin password (blank = auto):"    "" secret
 
     # Generated secrets (first install only).
@@ -193,8 +196,9 @@ else
     FERNET_V="$(gen_fernet)"
     DB_URL="postgresql+asyncpg://${POSTGRES_USER_V}:${PG_PASS}@postgres:5432/${POSTGRES_DB_V}"
 
-    # Admin credentials for the web panel.
-    if [ -n "${DOMAIN:-}" ]; then ADMIN_EMAIL_OUT="admin@${DOMAIN}"; else ADMIN_EMAIL_OUT="admin@example.com"; fi
+    # Admin credentials for the web panel (username scheme; email is optional).
+    ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+    ADMIN_USERNAME_OUT="$ADMIN_USERNAME"
     if [ -z "${WEB_ADMIN_PASSWORD:-}" ]; then
         WEB_ADMIN_PASSWORD="$(openssl rand -base64 12 | tr -d '/+=' | cut -c1-16)"
         ADMIN_PW_OUT="$WEB_ADMIN_PASSWORD"
@@ -214,7 +218,7 @@ else
     set_env FERNET_KEY            "$FERNET_V"
     set_env BACKUP_ENCRYPTION_KEY "$BACKUP_KEY_V"
     set_env WEB_PANEL_URL         "$WEB_PANEL_URL_V"
-    set_env ADMIN_EMAIL           "$ADMIN_EMAIL_OUT"
+    set_env ADMIN_USERNAME        "$ADMIN_USERNAME"
     set_env ADMIN_PASSWORD        "$WEB_ADMIN_PASSWORD"
     set_env TELEGRAM_BOT_TOKEN    "${BOT_TOKEN:-}"
     set_env TELEGRAM_ADMIN_ID     "${MAIN_ADMIN_TELEGRAM_ID:-}"
@@ -259,20 +263,39 @@ done
 [ -n "$ready_ok" ] || die "Backend /ready did not pass (database/redis not ready)."
 ok "/ready passed."
 
-# --- 9. done -----------------------------------------------------------------
-DOMAIN_LINE=""
-if grep -qE '^DOMAIN=' .env; then
-    D="$(grep -E '^DOMAIN=' .env | cut -d= -f2- || true)"
-    [ -n "$D" ] && DOMAIN_LINE="  Panel (domain): http://${D}:${API_PORT}  (put Nginx/HTTPS in front later)"
+# --- 9. installation summary ---------------------------------------------------
+# Secrets (SECRET_KEY / JWT_SECRET / FERNET_KEY / POSTGRES_PASSWORD /
+# BACKUP_ENCRYPTION_KEY / bot token value) are intentionally NEVER printed.
+DOMAIN_V="$(grep -E '^DOMAIN=' .env | cut -d= -f2- || true)"
+TG_ADMIN_V="$(grep -E '^TELEGRAM_ADMIN_ID=' .env | cut -d= -f2- || true)"
+BOT_TOKEN_V="$(grep -E '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2- || true)"
+if [ -z "${ADMIN_USERNAME_OUT:-}" ]; then
+    ADMIN_USERNAME_OUT="$(grep -E '^ADMIN_USERNAME=' .env | cut -d= -f2- || true)"
+    ADMIN_USERNAME_OUT="${ADMIN_USERNAME_OUT:-admin}"
 fi
+PANEL_URL="http://localhost:${API_PORT}"
 
 printf '\n%s\n' "${GREEN}${BOLD}DigitalCore is installed and healthy.${RESET}"
-printf '  Location:       %s\n' "$INSTALL_DIR"
-printf '  API / panel:    http://localhost:%s\n' "$API_PORT"
-[ -n "$DOMAIN_LINE" ] && printf '%s\n' "$DOMAIN_LINE"
-printf '  Admin email:    %s\n' "${ADMIN_EMAIL_OUT:-admin@example.com}"
-printf '  Admin password: %s\n' "${ADMIN_PW_OUT:-see your .env}"
-printf '\n%s\n' "${BOLD}Next:${RESET}"
-printf '  • Log in to the panel and configure card number, products, 3X-UI servers, texts, etc.\n'
-printf '  • Manage the stack:   cd %s && %s ps | logs backend | down\n' "$INSTALL_DIR" "$COMPOSE"
-printf '  • Your secrets live in %s/.env (mode 0600) — back it up.\n\n' "$INSTALL_DIR"
+printf '%s\n' "${BOLD}─────────────── Installation summary ───────────────${RESET}"
+printf '  Location:           %s\n' "$INSTALL_DIR"
+printf '  Panel URL:          %s   (HTTP only — Nginx/HTTPS is a later phase)\n' "$PANEL_URL"
+if [ -n "$DOMAIN_V" ]; then
+    printf '  Panel (domain):     http://%s:%s\n' "$DOMAIN_V" "$API_PORT"
+fi
+printf '  Login page:         %s/login\n' "$PANEL_URL"
+printf '  Admin username:     %s\n' "$ADMIN_USERNAME_OUT"
+printf '  Admin password:     %s\n' "${ADMIN_PW_OUT:-(the password you set)}"
+printf '  Telegram admin ID:  %s\n' "${TG_ADMIN_V:-not set}"
+if [ -n "$BOT_TOKEN_V" ]; then
+    printf '  Bot token:          configured\n'
+else
+    printf '  Bot token:          not set\n'
+fi
+printf '  Secrets file:       %s/.env (mode 600) — back it up safely.\n' "$INSTALL_DIR"
+printf '%s\n' "${BOLD}─────────────── Management commands ────────────────${RESET}"
+printf '  Update:    cd %s && sudo bash scripts/update.sh\n' "$INSTALL_DIR"
+printf '  Backup:    sudo bash scripts/backup.sh\n'
+printf '  Restore:   sudo bash scripts/restore.sh --latest\n'
+printf '  Health:    bash scripts/healthcheck.sh\n'
+printf '  Status:    %s ps\n' "$COMPOSE"
+printf '  Logs:      %s logs backend --tail=100\n\n' "$COMPOSE"

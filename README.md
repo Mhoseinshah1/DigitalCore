@@ -98,15 +98,20 @@ The installer is standalone: it installs Docker if missing, clones the repo to
 `WEB_PANEL_URL`), brings the stack up, runs `alembic upgrade head`, creates the
 admin, and gates on `/health` + `/ready`. It never reports success unless the app
 is actually healthy. It asks **only** for `BOT_TOKEN`, `MAIN_ADMIN_TELEGRAM_ID`,
-`DOMAIN`, and an optional web-admin password — everything else is configured later
-from the panel. The generated admin password is printed once at the end; secrets
-live in `/opt/digitalcore/.env` (mode `0600`) — back it up.
+`DOMAIN`, the admin **username** (default `admin`), and an optional web-admin
+password — everything else is configured later from the panel. At the end it
+prints a full installation summary (panel URL, login page, admin username and
+password, bot status, management commands) — secret keys are never printed;
+they live in `/opt/digitalcore/.env` (mode `0600`) — back it up.
+
+The panel admin signs in with the **username** (the optional `ADMIN_EMAIL`, when
+set, also works as the login identifier).
 
 Fully non-interactive (CI/automation):
 
 ```bash
 curl -fsSL .../scripts/install.sh | sudo BOT_TOKEN=123:abc MAIN_ADMIN_TELEGRAM_ID=111 \
-    DOMAIN=panel.example.com NON_INTERACTIVE=1 bash
+    DOMAIN=panel.example.com ADMIN_USERNAME=admin NON_INTERACTIVE=1 bash
 ```
 
 > **The panel is served over plain HTTP on port `:8000`.** For a real deployment,

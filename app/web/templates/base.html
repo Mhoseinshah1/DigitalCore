@@ -19,7 +19,7 @@
       {% endfor %}
     </nav>
     <div class="sidebar-foot">
-      <div class="who">👤 {{ admin.email }}{% if admin.is_super_admin %} · owner{% endif %}</div>
+      <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · owner{% endif %}</div>
       <a class="logout" href="/logout">Log out</a>
       <div class="ver">v{{ version }}</div>
     </div>

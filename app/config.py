@@ -52,7 +52,9 @@ class Settings(BaseSettings):
 
     # --- Auth / admin bootstrap ---
     JWT_SECRET: str = "change_me"
-    ADMIN_EMAIL: str = "admin@example.com"
+    ADMIN_USERNAME: str = "admin"
+    # Optional: an email can be attached to the admin and also used to sign in.
+    ADMIN_EMAIL: str = ""
     ADMIN_PASSWORD: str = "change_me"
 
     # --- Telegram (optional) ---
