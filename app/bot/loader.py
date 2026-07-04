@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from app.bot.handlers.admin import menu as admin_menu
 from app.bot.handlers.admin import products as admin_products
 from app.bot.handlers.admin import settings as admin_settings
+from app.bot.handlers.admin import xui as admin_xui
 from app.bot.handlers.user import language as user_language
 from app.bot.handlers.user import products as user_products
 from app.bot.handlers.user import rules as user_rules
@@ -36,6 +37,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_menu.router)
     dp.include_router(admin_settings.router)
     dp.include_router(admin_products.router)
+    dp.include_router(admin_xui.router)
     dp.include_router(user_language.router)
     dp.include_router(user_start.router)
     dp.include_router(user_rules.router)
