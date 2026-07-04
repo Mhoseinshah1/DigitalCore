@@ -1,11 +1,7 @@
-"""Telegram bot (Phase 1): minimal, reliable connectivity only.
+"""Telegram bot entrypoint (thin).
 
-- Requires TELEGRAM_BOT_TOKEN. If it is empty, logs a clear message and exits
-  gracefully (exit code 0) instead of crashing.
-- /start -> "DigitalCore bot is running."
-- /ping  -> "pong"
-
-No product/downloader features yet — those arrive in a later phase.
+Builds the bot + dispatcher via app.bot.loader and runs long polling. Exits
+cleanly (code 0) with a clear message when TELEGRAM_BOT_TOKEN is empty.
 """
 from __future__ import annotations
 
@@ -13,27 +9,12 @@ import asyncio
 import logging
 import sys
 
-from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
-
+from app.bot.loader import create_bot, create_dispatcher
 from app.config import settings
 from app.core.logging import configure_logging
 
 configure_logging()
 log = logging.getLogger("bot")
-
-dp = Dispatcher()
-
-
-@dp.message(CommandStart())
-async def on_start(message: Message) -> None:
-    await message.answer("DigitalCore bot is running.")
-
-
-@dp.message(Command("ping"))
-async def on_ping(message: Message) -> None:
-    await message.answer("pong")
 
 
 async def main() -> None:
@@ -45,7 +26,8 @@ async def main() -> None:
         )
         sys.exit(0)
 
-    bot = Bot(token=token)
+    bot = create_bot(token)
+    dp = create_dispatcher()
     log.info("DigitalCore bot starting (long polling)…")
     await dp.start_polling(bot)
 

@@ -21,5 +21,8 @@ class Admin(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # RBAC role: owner | admin | support | accountant | viewer (see app/core/permissions.py).
+    role: Mapped[str] = mapped_column(String(32), default="admin", nullable=False)
+
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<Admin id={self.id} username={self.username} super={self.is_super_admin}>"
