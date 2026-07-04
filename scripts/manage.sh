@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# DigitalCore management helper (Phase 1)
+# DigitalCore management helper
 # =============================================================================
 # Usage:
 #   bash scripts/manage.sh status
@@ -10,6 +10,9 @@
 #   bash scripts/manage.sh restart
 #   bash scripts/manage.sh down
 #   bash scripts/manage.sh health
+#   bash scripts/manage.sh backup
+#   bash scripts/manage.sh restore --latest --yes
+#   bash scripts/manage.sh update
 #
 # Logs do NOT follow by default; add --follow (or -f) to stream.
 # =============================================================================
@@ -32,7 +35,7 @@ API_PORT="$(grep -E '^API_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
 API_PORT="${API_PORT:-8000}"
 
 usage() {
-    sed -n '2,20p' "$0"
+    sed -n '2,23p' "$0"
     exit "${1:-0}"
 }
 
@@ -61,10 +64,16 @@ case "$cmd" in
         $COMPOSE down
         ;;
     health)
-        echo "GET http://localhost:${API_PORT}/health"
-        curl -fsS "http://localhost:${API_PORT}/health" && echo
-        echo "GET http://localhost:${API_PORT}/ready"
-        curl -fsS "http://localhost:${API_PORT}/ready" && echo
+        exec bash "$SCRIPT_DIR/healthcheck.sh"
+        ;;
+    backup)
+        exec bash "$SCRIPT_DIR/backup.sh" "${@:2}"
+        ;;
+    restore)
+        exec bash "$SCRIPT_DIR/restore.sh" "${@:2}"
+        ;;
+    update)
+        exec bash "$SCRIPT_DIR/update.sh" "${@:2}"
         ;;
     ""|-h|--help|help)
         usage 0

@@ -167,6 +167,38 @@ python -m app.worker.main    # logs a heartbeat every ~30s; Ctrl-C to stop
 | Health | `bash scripts/manage.sh health` |
 | Smoke test | `bash scripts/smoke-test.sh` |
 
+## Operations (backup, update, restore)
+
+The operational scripts read config from `.env` (never sourced), auto-detect
+`docker compose` / `docker-compose`, print colored status, and never log secrets.
+
+**Apply a new phase / update to the latest code** — push to `main`, then on the
+server run:
+
+```bash
+cd /opt/digitalcore && sudo bash scripts/update.sh
+```
+
+`update.sh` takes an encrypted backup first, pulls `origin/$REPO_BRANCH` (default
+`main`), rebuilds, runs `alembic upgrade head`, and gates on `/health` + `/ready`.
+If the build, migration, or health check fails, it automatically rolls the **code**
+back to the previous commit and rebuilds. A **DB** rollback (if a migration changed
+the schema) is manual by design — it prints the exact `restore.sh … --yes` command
+using the backup it just made.
+
+| Action | Command |
+|--------|---------|
+| Encrypted backup | `sudo bash scripts/backup.sh` (or `manage.sh backup`) |
+| Restore latest backup | `sudo bash scripts/restore.sh --latest` (add `--yes` to skip the prompt) |
+| Restore a specific backup | `sudo bash scripts/restore.sh storage/backups/<file>.tar.gz.enc` |
+| Safe update + rollback | `sudo bash scripts/update.sh` (or `manage.sh update`) |
+| Health check | `bash scripts/healthcheck.sh` (or `manage.sh health`) |
+
+Backups are AES-256 encrypted with `BACKUP_ENCRYPTION_KEY` and written to
+`storage/backups/` (mode `0600`); the newest `BACKUP_KEEP` (default 7) are kept.
+**Restore is destructive** — it overwrites the database, so it requires a typed
+`yes` unless `--yes` is passed.
+
 ## Admin auth API
 
 ```http
