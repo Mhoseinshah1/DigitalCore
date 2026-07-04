@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block anon %}
+<div class="login-wrap">
+  <form class="login-card" method="post" action="/login">
+    <div class="brand center">Digital<span>Core</span></div>
+    <p class="muted center">Admin panel</p>
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    <label>Username or Telegram ID
+      <input type="text" name="username" autocomplete="username" autofocus required>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit" class="btn primary full">Sign in</button>
+  </form>
+</div>
+{% endblock %}

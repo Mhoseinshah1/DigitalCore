@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DigitalCore{% endblock %} · DigitalCore</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+{% if admin %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">Digital<span>Core</span></div>
+    <nav>
+      {% for item in nav %}
+      <a class="nav-link {% if request.url.path == item.href %}active{% endif %}" href="{{ item.href }}">
+        <span class="nav-ico">{{ item.icon }}</span> {{ item.label }}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="sidebar-foot">
+      <div class="who">👤 {{ admin.username or admin.telegram_id }}{% if admin.is_owner %} · owner{% endif %}</div>
+      <a class="logout" href="/logout">Log out</a>
+      <div class="ver">v{{ version }}</div>
+    </div>
+  </aside>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% block anon %}{% endblock %}
+{% endif %}
+</body>
+</html>

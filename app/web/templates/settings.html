@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>Settings</h1>
+  <p class="muted">Configure the business here. These are stored in the database, not the installer.</p>
+</header>
+
+{% if saved %}<div class="alert ok">Settings saved.</div>{% endif %}
+
+<div class="settings-tabs">
+  {% for s in sections %}
+  <a href="#{{ s.category }}" class="tab">{{ s.icon }} {{ s.title }}</a>
+  {% endfor %}
+</div>
+
+<form method="post" action="/settings" class="settings-form">
+  {% for s in sections %}
+  <section class="panel" id="{{ s.category }}">
+    <h2>{{ s.icon }} {{ s.title }}</h2>
+    {% if s.category == 'v2ray' %}
+    <p class="muted small">
+      3X-UI server management (add server · test connection · sync inbounds) arrives
+      in a later phase. The default inbound selection is available now.
+    </p>
+    {% elif s.category == 'license' %}
+    <p class="muted small">
+      Adding license products and importing stock arrives in a later phase.
+      The low-stock alert threshold is available now.
+    </p>
+    {% endif %}
+    <div class="fields">
+      {% for f in s['items'] %}
+      <div class="field field-{{ f.value_type }}">
+        {% if f.value_type == 'bool' %}
+        <label class="switch">
+          <input type="checkbox" name="{{ f.key }}" {% if f.value %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ f.label }}</span>
+        </label>
+        {% else %}
+        <label for="{{ f.key }}">{{ f.label }}</label>
+        {% if f.is_secret %}
+        <input id="{{ f.key }}" name="{{ f.key }}" type="password" value="" autocomplete="off"
+               placeholder="{% if f.has_secret %}•••••••• (leave blank to keep){% else %}{{ f.description }}{% endif %}">
+        {% elif f.value_type == 'text' %}
+        <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3" placeholder="{{ f.description }}">{{ f.value }}</textarea>
+        {% elif f.value_type == 'int' %}
+        <input id="{{ f.key }}" name="{{ f.key }}" type="number" value="{{ f.value }}" inputmode="numeric">
+        {% else %}
+        <input id="{{ f.key }}" name="{{ f.key }}" type="text" value="{{ f.value }}" placeholder="{{ f.description }}">
+        {% endif %}
+        {% endif %}
+        {% if f.description and f.value_type != 'bool' %}
+        <small class="hint">{{ f.description }}</small>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="form-actions">
+    <button type="submit" class="btn primary">Save all settings</button>
+  </div>
+</form>
+{% endblock %}
