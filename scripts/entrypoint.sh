@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Container entrypoint. Selects the service role and, for the web role, runs
-# database migrations and seeds the owner admin + default (empty) business
-# settings before starting. Seeding is idempotent, so restarts are safe.
+# Container entrypoint. Selects the service role.
+#
+# Migrations are intentionally NOT run automatically — Phase 1 runs them
+# explicitly (docker compose exec backend alembic upgrade head) so the flow is
+# predictable. The `migrate` role is available for convenience/automation.
 set -euo pipefail
 
-ROLE="${1:-web}"
+ROLE="${1:-backend}"
 
 wait_for_db() {
     echo "==> Waiting for the database…"
@@ -12,19 +14,15 @@ wait_for_db() {
 }
 
 case "$ROLE" in
-    web)
+    backend|web)
         wait_for_db
-        echo "==> Running database migrations…"
-        alembic upgrade head
-        echo "==> Seeding owner admin and default settings…"
-        python -m app.seed
-        echo "==> Starting web panel on :8000…"
-        exec uvicorn app.web.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
+        echo "==> Starting backend API on ${API_HOST:-0.0.0.0}:${API_PORT:-8000}…"
+        exec uvicorn app.web.main:app \
+            --host "${API_HOST:-0.0.0.0}" \
+            --port "${API_PORT:-8000}" \
+            --proxy-headers --forwarded-allow-ips='*'
         ;;
     bot)
-        wait_for_db
-        # The bot waits for the web role to have applied migrations/seed (compose
-        # gates it on web being healthy), so it does not migrate or seed itself.
         echo "==> Starting Telegram bot…"
         exec python -m app.bot.main
         ;;
@@ -32,16 +30,16 @@ case "$ROLE" in
         wait_for_db
         exec alembic upgrade head
         ;;
-    seed)
+    create-admin)
         wait_for_db
-        exec python -m app.seed
+        exec python scripts/create_admin.py "${@:2}"
         ;;
     shell)
         exec /bin/bash
         ;;
     *)
         echo "Unknown service role: $ROLE" >&2
-        echo "Valid roles: web | bot | migrate | seed | shell" >&2
+        echo "Valid roles: backend | bot | migrate | create-admin | shell" >&2
         exit 64
         ;;
 esac

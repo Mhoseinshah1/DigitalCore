@@ -1,4 +1,4 @@
-"""initial schema: admins + settings
+"""initial schema: admins, users, settings
 
 Revision ID: 0001_initial
 Revises:
@@ -17,35 +17,46 @@ def upgrade() -> None:
     op.create_table(
         "admins",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("telegram_id", sa.BigInteger(), nullable=False),
-        sa.Column("username", sa.String(length=64), nullable=True),
-        sa.Column("password_hash", sa.String(length=255), nullable=True),
-        sa.Column("is_owner", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("email", sa.String(length=255), nullable=False),
+        sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("is_super_admin", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("telegram_id", name="uq_admins_telegram_id"),
-        sa.UniqueConstraint("username", name="uq_admins_username"),
+        sa.UniqueConstraint("email", name="uq_admins_email"),
     )
-    op.create_index("ix_admins_telegram_id", "admins", ["telegram_id"])
-    op.create_index("ix_admins_username", "admins", ["username"])
+    op.create_index("ix_admins_email", "admins", ["email"])
+
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("telegram_id", sa.BigInteger(), nullable=True),
+        sa.Column("username", sa.String(length=255), nullable=True),
+        sa.Column("first_name", sa.String(length=255), nullable=True),
+        sa.Column("last_name", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.UniqueConstraint("telegram_id", name="uq_users_telegram_id"),
+    )
+    op.create_index("ix_users_telegram_id", "users", ["telegram_id"])
 
     op.create_table(
         "settings",
-        sa.Column("key", sa.String(length=64), primary_key=True),
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("key", sa.String(length=128), nullable=False),
         sa.Column("value", sa.Text(), nullable=False, server_default=""),
-        sa.Column("category", sa.String(length=32), nullable=False, server_default="general"),
-        sa.Column("value_type", sa.String(length=16), nullable=False, server_default="string"),
         sa.Column("is_secret", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("label", sa.String(length=128), nullable=False, server_default=""),
-        sa.Column("description", sa.String(length=255), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.UniqueConstraint("key", name="uq_settings_key"),
     )
+    op.create_index("ix_settings_key", "settings", ["key"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_settings_key", table_name="settings")
     op.drop_table("settings")
-    op.drop_index("ix_admins_username", table_name="admins")
-    op.drop_index("ix_admins_telegram_id", table_name="admins")
+    op.drop_index("ix_users_telegram_id", table_name="users")
+    op.drop_table("users")
+    op.drop_index("ix_admins_email", table_name="admins")
     op.drop_table("admins")

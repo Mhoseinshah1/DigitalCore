@@ -1,4 +1,4 @@
-"""Password hashing and JWT helpers for the web panel."""
+"""Password hashing (bcrypt) and JWT helpers for admin auth."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -29,14 +29,15 @@ def verify_password(password: str, password_hash: str | None) -> bool:
         return False
 
 
-def create_access_token(subject: str, *, is_owner: bool = False) -> str:
+def create_access_token(subject: str | int, *, email: str | None = None) -> str:
     now = datetime.now(timezone.utc)
-    payload = {
+    payload: dict = {
         "sub": str(subject),
-        "owner": is_owner,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)).timestamp()),
     }
+    if email is not None:
+        payload["email"] = email
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

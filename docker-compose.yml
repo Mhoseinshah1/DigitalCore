@@ -1,7 +1,7 @@
-# DigitalCore stack.
+# DigitalCore stack (Phase 1).
 #
-# Boot settings come from the .env file written by ./install.sh.
-# Business settings are stored in the database and edited from the admin panel.
+# Configuration comes from the .env file (copy it from .env.example).
+# Bring everything up with:  docker compose up -d --build
 
 services:
   postgres:
@@ -31,11 +31,11 @@ services:
       timeout: 5s
       retries: 20
 
-  web:
+  backend:
     build: .
     image: digitalcore:latest
     restart: unless-stopped
-    command: ["web"]
+    command: ["backend"]
     env_file: .env
     depends_on:
       postgres:
@@ -54,15 +54,13 @@ services:
   bot:
     build: .
     image: digitalcore:latest
-    restart: unless-stopped
+    # Exits cleanly (code 0) when TELEGRAM_BOT_TOKEN is empty; on-failure so a
+    # graceful "no token" exit does not restart-loop, but real crashes do.
+    restart: on-failure
     command: ["bot"]
     env_file: .env
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      web:
+      backend:
         condition: service_healthy
 
 volumes:

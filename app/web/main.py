@@ -1,43 +1,54 @@
-"""FastAPI application: the admin web panel and its JSON API."""
+"""DigitalCore backend API.
+
+Phase 1 surface: liveness (/health), readiness (/ready, checks the database), and
+minimal admin auth (/api/auth/*). No product features yet.
+"""
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
-from app import __version__
 from app.config import settings
+from app.database import engine
 from app.web.api import auth as auth_api
-from app.web.api import settings as settings_api
-from app.web.views import router as views_router
 
-BASE_DIR = Path(__file__).resolve().parent
+log = logging.getLogger("backend")
 
-log = logging.getLogger("web")
-for _warning in settings.insecure_config_warnings():
-    log.warning("INSECURE CONFIG: %s", _warning)
-
-app = FastAPI(title="DigitalCore Admin", version=__version__)
-
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app = FastAPI(title=settings.service_name, version=settings.APP_VERSION)
 
 app.include_router(auth_api.router)
-app.include_router(settings_api.router)
-app.include_router(views_router)
 
 
-@app.get("/healthz", include_in_schema=False)
-async def healthz() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
-
-
-@app.get("/api/status", tags=["meta"])
-async def status() -> dict:
+@app.get("/health", tags=["meta"])
+async def health() -> dict:
+    """Liveness check — must succeed without touching the database."""
     return {
-        "app": "DigitalCore",
-        "version": __version__,
-        "domain": settings.DOMAIN,
-        "maintenance_mode": settings.MAINTENANCE_MODE,
+        "status": "ok",
+        "service": settings.service_name,
+        "version": settings.APP_VERSION,
     }
+
+
+@app.get("/ready", tags=["meta"])
+async def ready() -> JSONResponse:
+    """Readiness check — verifies the database connection."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 - any failure means "not ready"
+        log.warning("Readiness check failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not ready",
+                "database": "error",
+                "detail": "database connection failed",
+            },
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ready", "database": "ok"},
+    )

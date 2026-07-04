@@ -1,150 +1,169 @@
 # DigitalCore
 
-A Telegram + web-panel platform for selling digital products (V2Ray subscriptions,
-license keys) with card-to-card payments and a wallet.
+A Telegram + backend platform. This repository is being built in phases; the
+foundation is deliberately minimal, testable, and installable before any product
+features are added.
 
-This repository currently contains the **foundation**: a minimal one-command
-installer, the boot/business settings split, automatic secret generation, owner
-admin + default settings seeding, and an admin web panel with a **Settings** page.
-Business logic (sales flows, V2Ray/3X-UI integration, licenses, payments) is added
-in later phases and is configured from the panel — never from the installer.
+## Phase status
 
-## Design rule
+- **Phase 0 — done.** Repository, Docker Compose skeleton, first installer.
+- **Phase 1 — current.** Runnable backend with health/readiness, database
+  migrations, admin bootstrap, minimal admin auth API, basic bot connectivity,
+  installer/management/smoke scripts, and CI.
+- **Phase 2 — planned.** Admin panel, users management, bot database
+  registration, role-based permissions, first business modules.
 
-> The installer only **boots** the platform. The admin panel **configures** the
-> business.
+> The Phase 0 Jinja admin panel and business-settings catalog remain in the tree
+> but are **dormant** (not wired into the app) because Phase 1 uses an
+> email-based admin model. They are rebuilt properly in Phase 2.
 
-The installer asks for the four things required for first boot and nothing else:
+## Architecture
 
-1. Telegram `BOT_TOKEN`
-2. Main admin Telegram ID
-3. Web panel domain
-4. Web admin password (optional — generated if left blank)
-
-It never asks for card numbers, SHEBA, card owner, log group, force-join channel,
-products, V2Ray plans, 3X-UI servers, license stock, payment/support texts,
-tutorials, or any other business setting. All of those are configured later from
-**Settings** in the admin panel.
+| Component | Tech |
+|-----------|------|
+| Backend API | FastAPI + Uvicorn (service name: `backend`) |
+| Bot | aiogram 3 (long polling) |
+| Database | PostgreSQL 16 (async SQLAlchemy 2 + Alembic) |
+| Cache | Redis 7 (present; not required by Phase 1 code) |
+| Runtime | Docker Compose (single image: `backend` + `bot`) |
 
 ## Requirements
 
-- Docker and Docker Compose
-- A domain (or IP) pointing at the host for the web panel
+- Ubuntu (installer targets Ubuntu; other Linux works for manual setup)
+- Docker Engine and the Docker Compose plugin
+- Ports: `8000` (backend) available on the host
 
-## Install
-
-`main` is the production branch. Clone the repository and run the one-command
-installer:
+## Quick start (Docker)
 
 ```bash
 git clone https://github.com/Mhoseinshah1/DigitalCore.git digitalcore
 cd digitalcore
+cp .env.example .env
+docker compose up -d --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python scripts/create_admin.py
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8000/ready
+```
+
+Expected results:
+
+```json
+// GET /health
+{"status": "ok", "service": "DigitalCore API", "version": "0.1.0"}
+
+// GET /ready
+{"status": "ready", "database": "ok"}
+```
+
+## Installer v0
+
+The installer performs the whole flow and refuses to report success unless
+`/health` and `/ready` both pass:
+
+```bash
 sudo bash scripts/install.sh
 ```
 
-`scripts/install.sh` simply forwards to the root `./install.sh` — either works.
+It checks Ubuntu/Docker/Compose, creates `.env` from `.env.example` (prompting
+for domain, admin email/password, and optional Telegram token/admin id), builds
+and starts the stack, runs migrations, creates the super admin, and verifies
+health/readiness. On failure it prints `docker ps -a` and
+`docker compose logs backend --tail=200` and exits non-zero.
 
-> The installer builds the stack from this repository (Docker Compose), so it
-> must be run from a full clone. A standalone `curl … | bash` one-liner is not
-> used, because there is nothing to build without the repository present.
+`./install.sh` from the repo root forwards to `scripts/install.sh`.
 
-The installer will:
-
-- check Docker is available,
-- ask the four questions above,
-- generate every secret automatically (`SECRET_KEY`, `JWT_SECRET`, `FERNET_KEY`,
-  `BACKUP_ENCRYPTION_KEY`, database password),
-- default `ADMIN_TELEGRAM_IDS` to your main admin ID,
-- derive `WEB_PANEL_URL` from the domain,
-- write `.env`,
-- build and start the stack,
-- and on first boot create the **owner admin** (your Telegram ID) plus **empty
-  default records** for every business setting.
-
-At the end it prints the panel URL and login. If you left the password blank, the
-generated password is shown **once** — save it.
-
-### Non-interactive install
+## Local development (without Docker)
 
 ```bash
-BOT_TOKEN=123:abc \
-MAIN_ADMIN_TELEGRAM_ID=123456789 \
-WEB_PANEL_DOMAIN=panel.example.com \
-WEB_ADMIN_PASSWORD=optional \
-./install.sh --non-interactive
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# point DATABASE_URL at a reachable Postgres (or use the compose one)
+alembic upgrade head
+python scripts/create_admin.py
+uvicorn app.web.main:app --reload --port 8000
 ```
-
-## After install
-
-Open the panel, sign in as `admin` (or your Telegram ID) and go to **Settings** to
-configure:
-
-| Section   | What you configure                                                        |
-|-----------|---------------------------------------------------------------------------|
-| Payment   | Card number, SHEBA, card owner, payment instructions                      |
-| Telegram  | Log group/channel, force-join channel, support username, broadcasts       |
-| Bot texts | Start, rules, payment, successful/rejected payment, expiration warning    |
-| Business  | Enable sales / card payment / wallet / free test, min wallet top-up       |
-| V2Ray     | Default inbound (server management & inbound sync come in a later phase)   |
-| License   | Low-stock alert threshold (products & stock import come in a later phase)  |
-
-## Configuration model
-
-`.env.example` is split into two clearly separated sections:
-
-- **Boot settings** — required to start (bot token, admin ID, domain, datastore
-  URLs, secrets, maintenance flag). Filled in by the installer.
-- **Business settings** — optional, empty by default, configured from the panel.
-  A handful can be pre-seeded from the environment for automated deployments, but
-  the installer never asks for them.
-
-The exact settings records seeded on first boot (all empty/default) include:
-`log_group_id`, `force_join_channel`, `default_card_number`, `default_card_owner`,
-`default_sheba`, `payment_text`, `start_text`, `rules_text`, `support_text`,
-`maintenance_mode`, plus the rest of the catalog in
-[`app/core/defaults.py`](app/core/defaults.py).
-
-## Architecture
-
-| Component | Tech                                        |
-|-----------|---------------------------------------------|
-| Web panel | FastAPI + Jinja2 (server-rendered) + JWT    |
-| Bot       | aiogram 3 (long polling)                     |
-| Database  | PostgreSQL 16 (async SQLAlchemy + Alembic)  |
-| Cache     | Redis 7                                      |
-| Runtime   | Docker Compose (single image, `web` + `bot`) |
-
-Secrets flagged as secret in the settings catalog are encrypted at rest with
-`FERNET_KEY`.
 
 ## Common commands
 
-```bash
-make up        # start
-make down      # stop
-make logs      # tail logs
-make ps        # status
-make seed      # re-run idempotent seeding
-make migrate   # apply migrations
+| Action | Command |
+|--------|---------|
+| Migrate | `docker compose exec backend alembic upgrade head` |
+| Create admin | `docker compose exec backend python scripts/create_admin.py` |
+| Reset admin password | `docker compose exec backend python scripts/create_admin.py --reset-password` |
+| Status | `bash scripts/manage.sh status` |
+| Logs (no follow) | `bash scripts/manage.sh logs backend` |
+| Logs (follow) | `bash scripts/manage.sh logs backend --follow` |
+| Restart | `bash scripts/manage.sh restart` |
+| Stop | `bash scripts/manage.sh down` |
+| Health | `bash scripts/manage.sh health` |
+| Smoke test | `bash scripts/smoke-test.sh` |
+
+## Admin auth API
+
+```http
+POST /api/auth/login    { "email": "...", "password": "..." }  -> { "access_token", "token_type" }
+GET  /api/auth/me       Authorization: Bearer <token>          -> admin profile
 ```
+
+## Database
+
+Migrations are explicit (`op.create_table`, not `create_all`). Phase 1 tables:
+`admins` (email/password), `users` (telegram user, nullable for now), `settings`
+(key/value/is_secret). The backend does **not** auto-migrate; run migrations
+explicitly as shown above.
+
+## Environment
+
+`.env` is gitignored; `.env.example` is safe to commit. Copy and edit it:
+
+```bash
+cp .env.example .env
+```
+
+The backend runs fine with `TELEGRAM_BOT_TOKEN` empty. The bot service logs a
+clear message and exits cleanly when the token is missing.
+
+## Troubleshooting
+
+- **`scripts/install.sh: No such file or directory`** — run from the repository
+  root after cloning: `cd digitalcore && sudo bash scripts/install.sh`. Make sure
+  the clone completed and you are in the project directory.
+- **Docker not installed / daemon not running** — install Docker Engine +
+  Compose plugin (https://docs.docker.com/engine/install/ubuntu/) and ensure the
+  daemon is running (`sudo systemctl start docker`); run the installer with
+  `sudo` if your user is not in the `docker` group.
+- **Backend health failed** — inspect containers and logs:
+  `docker ps -a` and `docker compose logs backend --tail=200`. A common cause is
+  the port `8000` already being in use.
+- **Database not ready (`/ready` returns 503)** — Postgres may still be starting;
+  wait and retry. Check `docker compose logs postgres` and confirm `DATABASE_URL`
+  in `.env` matches the `postgres` service credentials.
+- **Telegram token missing** — expected in Phase 1. The backend is unaffected;
+  the `bot` container exits cleanly (code 0) and will not restart-loop. Set
+  `TELEGRAM_BOT_TOKEN` in `.env` and `docker compose up -d bot` to enable it.
 
 ## Layout
 
 ```
-install.sh              one-command installer (boot only)
-.env.example            boot vs business settings, documented
-docker-compose.yml      postgres, redis, web, bot
-Dockerfile              single image for web + bot
+docker-compose.yml         postgres, redis, backend, bot
+Dockerfile                 single image for backend + bot
+.env.example               environment template (safe to commit)
 app/
-  config.py             boot settings from env
-  core/
-    defaults.py         canonical business-settings catalog
-    settings_service.py typed get/set with encryption
-    crypto.py           Fernet encryption of secret settings
-    security.py         password hashing + JWT
-  models/               Admin, Setting
-  seed.py               owner admin + default settings (idempotent)
-  web/                  FastAPI panel: auth, Settings page, JSON API
-  bot/                  aiogram skeleton
-migrations/             Alembic
+  config.py                settings loader
+  database.py              async SQLAlchemy engine/session
+  models/                  Admin, User, Setting
+  core/security.py         bcrypt + JWT
+  web/main.py              FastAPI app: /health, /ready
+  web/api/auth.py          /api/auth/login, /api/auth/me
+  bot/main.py              aiogram bot: /start, /ping
+migrations/                Alembic (0001_initial: admins, users, settings)
+scripts/
+  install.sh               installer v0
+  manage.sh                status/logs/restart/down/health
+  smoke-test.sh            full happy-path check
+  create_admin.py          super-admin bootstrap
+  entrypoint.sh            container role selector
+.github/workflows/ci.yml   syntax + compose config checks
 ```
