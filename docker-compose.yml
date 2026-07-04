@@ -44,6 +44,11 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    # Persist runtime files (receipts, exports, logs, backups) on the host. The
+    # container app lives at /srv/digitalcore, so storage/ maps there — the same
+    # path the host-side backup/restore scripts read.
+    volumes:
+      - ./storage:/srv/digitalcore/storage
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 5s
@@ -60,8 +65,12 @@ services:
     command: ["bot"]
     env_file: .env
     depends_on:
-      backend:
+      postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./storage:/srv/digitalcore/storage
 
   worker:
     build: .
@@ -74,6 +83,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./storage:/srv/digitalcore/storage
 
 volumes:
   postgres_data:

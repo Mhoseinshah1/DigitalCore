@@ -10,10 +10,18 @@ features are added.
 - **Phase 1 — done.** Runnable backend with health/readiness, database
   migrations, admin bootstrap, minimal admin auth API, basic bot connectivity,
   installer/management/smoke scripts, and CI.
-- **Phase R — current.** Foundation hardening: fix the crypto/config key gap,
+- **Phase R — done.** Foundation hardening: fix the crypto/config key gap,
   add the Redis client, structured logging, a worker entrypoint, empty service
   packages, runtime `storage/` dirs, and a pytest test baseline. `/ready` now
   checks the database **and** Redis. No behaviour change to existing features.
+- **Phase R.1 — done.** Foundation formatting, validation, and installer
+  hardening: audited every source/config/script file for readability (all are
+  normal multi-line files), hardened `scripts/install.sh` (`set -Eeuo pipefail`
+  plus an `ERR` trap that reports the failing line and command and dumps
+  `backend`/`bot`/`worker`/`postgres`/`redis` logs on failure — never a silent
+  exit), persisted `./storage` into the backend/bot/worker containers, and
+  verified the full validation gate (compile, tests, `bash -n`, `docker compose
+  config`). No business features added.
 - **Phase 2 — planned.** Admin panel, users management, bot database
   registration, role-based permissions, first business modules.
 
@@ -119,7 +127,14 @@ curl -fsSL .../scripts/install.sh | sudo BOT_TOKEN=123:abc MAIN_ADMIN_TELEGRAM_I
 > terminate TLS at Nginx for your `DOMAIN` and proxy to `127.0.0.1:8000`. TLS is
 > not configured by the installer.
 
-Running `./install.sh` from inside a checkout forwards to `scripts/install.sh`.
+Or install from a clone (the root `./install.sh` forwards to `scripts/install.sh`):
+
+```bash
+git clone https://github.com/Mhoseinshah1/DigitalCore.git digitalcore
+cd digitalcore
+sudo ./install.sh
+```
+
 Re-running the installer is safe — it keeps your existing `.env` and secrets.
 
 ## Local development (without Docker)

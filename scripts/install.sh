@@ -21,7 +21,9 @@
 # /health + /ready. It never claims success unless the app is actually healthy,
 # and never silently exits.
 # =============================================================================
-set -euo pipefail
+# -E makes the ERR trap fire inside functions/subshells too, so a failure
+# anywhere is reported with its line and command rather than exiting silently.
+set -Eeuo pipefail
 
 # --- configuration (override via env if needed) ------------------------------
 REPO_URL="${REPO_URL:-https://github.com/Mhoseinshah1/DigitalCore.git}"
@@ -44,17 +46,23 @@ die()  { printf '%s\n' "${RED}✗ $*${RESET}" >&2; exit 1; }
 # --- error trap: never exit silently ----------------------------------------
 COMPOSE=""
 on_error() {
-    local code=$?
+    # Capture status first; $LINENO and $BASH_COMMAND are passed in from the trap.
+    local code=$? line="${1:-?}" cmd="${2:-?}"
     printf '\n%s\n' "${RED}${BOLD}Installation FAILED (exit ${code}).${RESET}" >&2
+    printf '%s\n' "${RED}  Failed at line ${line}: ${cmd}${RESET}" >&2
     if [ -n "$COMPOSE" ] && [ -d "$INSTALL_DIR" ]; then
-        warn "Recent container status and backend logs:"
-        ( cd "$INSTALL_DIR" && docker ps -a 2>/dev/null || true )
-        ( cd "$INSTALL_DIR" && $COMPOSE logs backend --tail=120 2>/dev/null || true )
+        warn "Container status (${COMPOSE} ps -a):"
+        ( cd "$INSTALL_DIR" && $COMPOSE ps -a 2>/dev/null || true )
+        for svc in backend bot worker postgres redis; do
+            warn "Last logs for '${svc}':"
+            ( cd "$INSTALL_DIR" && $COMPOSE logs "$svc" --tail=80 2>/dev/null || true )
+        done
     fi
     printf '%s\n' "See the messages above. Re-running the installer is safe (it keeps your .env)." >&2
     exit "$code"
 }
-trap on_error ERR
+# Pass the failing line and command so the report is specific, never silent.
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
 # --- helpers -----------------------------------------------------------------
 # Read from the real terminal even when the script is piped from curl.
