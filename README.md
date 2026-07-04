@@ -84,22 +84,38 @@ Expected results:
 {"status": "ready", "database": "ok", "redis": "ok"}
 ```
 
-## Installer v0
+## One-command install (production, Ubuntu 22.04/24.04)
 
-The installer performs the whole flow and refuses to report success unless
-`/health` and `/ready` both pass:
+On a fresh Ubuntu server (amd64 or arm64), run:
 
 ```bash
-sudo bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/Mhoseinshah1/DigitalCore/main/scripts/install.sh | sudo bash
 ```
 
-It checks Ubuntu/Docker/Compose, creates `.env` from `.env.example` (prompting
-for domain, admin email/password, and optional Telegram token/admin id), builds
-and starts the stack, runs migrations, creates the super admin, and verifies
-health/readiness. On failure it prints `docker ps -a` and
-`docker compose logs backend --tail=200` and exits non-zero.
+The installer is standalone: it installs Docker if missing, clones the repo to
+`/opt/digitalcore`, **generates all secrets** (`POSTGRES_PASSWORD`, `SECRET_KEY`,
+`JWT_SECRET`, `FERNET_KEY`, `BACKUP_ENCRYPTION_KEY`, `DATABASE_URL`, `REDIS_URL`,
+`WEB_PANEL_URL`), brings the stack up, runs `alembic upgrade head`, creates the
+admin, and gates on `/health` + `/ready`. It never reports success unless the app
+is actually healthy. It asks **only** for `BOT_TOKEN`, `MAIN_ADMIN_TELEGRAM_ID`,
+`DOMAIN`, and an optional web-admin password — everything else is configured later
+from the panel. The generated admin password is printed once at the end; secrets
+live in `/opt/digitalcore/.env` (mode `0600`) — back it up.
 
-`./install.sh` from the repo root forwards to `scripts/install.sh`.
+Fully non-interactive (CI/automation):
+
+```bash
+curl -fsSL .../scripts/install.sh | sudo BOT_TOKEN=123:abc MAIN_ADMIN_TELEGRAM_ID=111 \
+    DOMAIN=panel.example.com NON_INTERACTIVE=1 bash
+```
+
+> **The panel is served over plain HTTP on port `:8000`.** For a real deployment,
+> put **Nginx (or another reverse proxy) with HTTPS/TLS in front of it** — e.g.
+> terminate TLS at Nginx for your `DOMAIN` and proxy to `127.0.0.1:8000`. TLS is
+> not configured by the installer.
+
+Running `./install.sh` from inside a checkout forwards to `scripts/install.sh`.
+Re-running the installer is safe — it keeps your existing `.env` and secrets.
 
 ## Local development (without Docker)
 
