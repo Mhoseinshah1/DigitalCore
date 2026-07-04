@@ -224,4 +224,20 @@ CATALOG: dict[str, str] = {
     "web.servers.not_saved": "Not saved: {error}",
     "web.servers.tested": "Connection test: {message}",
     "web.servers.synced": "Synced {count} inbound(s).",
+
+    # --- navigation shell (grouped sidebar) --------------------------------------
+    "web.nav.sales": "Sales",
+    "web.nav.orders": "Orders",
+    "web.nav.payments": "Payments & receipts",
+    "web.nav.licenses": "Licenses",
+    "web.nav.services": "V2Ray services",
+    "web.nav.xui": "3X-UI servers (Sanaei)",
+    "web.nav.inbounds": "Inbounds",
+    "web.nav.users": "Users",
+    "web.nav.reports_group": "Reports & logs",
+    "web.nav.reports": "Reports",
+    "web.nav.audit_logs": "Audit logs",
+    "web.nav.soon": "soon",
+    "web.placeholder.body": "This section is coming soon.",
+    "web.placeholder.hint": "The interface is ready; the backend for this section is being built.",
 }

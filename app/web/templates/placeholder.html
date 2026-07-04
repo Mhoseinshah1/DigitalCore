@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ _(page_title_key) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _(page_title_key) }}</h1>
+</header>
+
+<section class="placeholder-page">
+  <div class="placeholder-emoji">🚧</div>
+  <p class="placeholder-msg">{{ _("web.placeholder.body") }}</p>
+  <p class="muted small">{{ _("web.placeholder.hint") }}</p>
+</section>
+{% endblock %}
