@@ -9,30 +9,76 @@
 <body>
 {% if admin %}
 <div class="layout">
-  <aside class="sidebar">
+  <div class="scrim" id="navScrim"></div>
+  <aside class="sidebar" id="sidebar">
     <div class="brand">Digital<span>Core</span></div>
-    <nav>
-      {% for item in nav %}
-      <a class="nav-link {% if request.url.path == item.href %}active{% endif %}" href="{{ item.href }}">
-        <span class="nav-ico">{{ item.icon }}</span> {{ _(item.label_key) }}
-      </a>
+    <nav class="nav-tree">
+      {% for sec in nav %}
+        {% if sec.children %}
+        <details class="nav-group{% if sec.active %} active{% endif %}" open>
+          <summary class="nav-group-head">
+            <span class="nav-ico">{{ sec.icon }}</span>
+            <span class="nav-group-label">{{ sec.label }}</span>
+            <span class="nav-caret" aria-hidden="true">▾</span>
+          </summary>
+          <div class="nav-sub">
+            {% for it in sec.children %}
+            <a class="nav-link{% if it.active %} active{% endif %}" href="{{ it.href }}">
+              <span class="nav-ico">{{ it.icon }}</span>
+              <span class="nav-label">{{ it.label }}</span>
+              {% if it.placeholder %}<span class="nav-badge">{{ _("web.nav.soon") }}</span>{% endif %}
+            </a>
+            {% endfor %}
+          </div>
+        </details>
+        {% else %}
+        <a class="nav-link nav-top{% if sec.active %} active{% endif %}" href="{{ sec.href }}">
+          <span class="nav-ico">{{ sec.icon }}</span>
+          <span class="nav-label">{{ sec.label }}</span>
+          {% if sec.placeholder %}<span class="nav-badge">{{ _("web.nav.soon") }}</span>{% endif %}
+        </a>
+        {% endif %}
       {% endfor %}
     </nav>
-    <div class="lang-switch">
-      <a href="/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
-      <span>·</span>
-      <a href="/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
-    </div>
     <div class="sidebar-foot">
-      <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · {{ _("web.owner_badge") }}{% endif %}</div>
-      <a class="logout" href="/logout">{{ _("web.logout") }}</a>
       <div class="ver">v{{ version }}</div>
     </div>
   </aside>
-  <main class="content">
-    {% block content %}{% endblock %}
-  </main>
+
+  <div class="main-col">
+    <header class="topbar">
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <div class="lang-switch">
+          <a href="/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
+          <span>·</span>
+          <a href="/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
+        </div>
+        <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · {{ _("web.owner_badge") }}{% endif %}</div>
+        <a class="btn small logout-btn" href="/logout">{{ _("web.logout") }}</a>
+      </div>
+    </header>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </div>
+<script>
+  (function () {
+    var toggle = document.getElementById('navToggle');
+    var sidebar = document.getElementById('sidebar');
+    var scrim = document.getElementById('navScrim');
+    function close() { sidebar.classList.remove('open'); document.body.classList.remove('nav-open'); }
+    if (toggle && sidebar) {
+      toggle.addEventListener('click', function () {
+        sidebar.classList.toggle('open');
+        document.body.classList.toggle('nav-open');
+      });
+    }
+    if (scrim) { scrim.addEventListener('click', close); }
+  })();
+</script>
 {% else %}
   {% block anon %}{% endblock %}
 {% endif %}

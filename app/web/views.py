@@ -46,11 +46,58 @@ router = APIRouter(include_in_schema=False)
 
 LANG_COOKIE = "dc_lang"
 
-NAV = [
-    {"href": "/", "label_key": "web.nav.dashboard", "icon": "🏠"},
-    {"href": "/products", "label_key": "web.nav.products", "icon": "📦"},
-    {"href": "/servers", "label_key": "web.nav.servers", "icon": "🖥"},
-    {"href": "/settings", "label_key": "web.nav.settings", "icon": "⚙️"},
+# Grouped, nested navigation. Each top-level entry is either a direct link
+# (has "href") or an expandable group (has "items"). Every entry carries the
+# permission needed to see it; the settings group's sub-items are generated from
+# the settings CATEGORIES at render time. `placeholder=True` marks sections whose
+# backend isn't built yet — they route to a "coming soon" page, never fake data.
+NAV_TREE: list[dict] = [
+    {"label_key": "web.nav.dashboard", "icon": "🏠", "href": "/",
+     "permission": "view_dashboard"},
+    {"label_key": "web.nav.sales", "icon": "🛒",
+     "items": [
+         {"label_key": "web.nav.products", "icon": "📦", "href": "/products",
+          "permission": "manage_products"},
+         {"label_key": "web.nav.orders", "icon": "🧾", "href": "/orders",
+          "permission": "approve_payments", "placeholder": True},
+         {"label_key": "web.nav.payments", "icon": "💳", "href": "/payments",
+          "permission": "approve_payments", "placeholder": True},
+     ]},
+    {"label_key": "web.nav.licenses", "icon": "🔑", "href": "/licenses",
+     "permission": "manage_products", "placeholder": True},
+    {"label_key": "web.nav.services", "icon": "🌐", "href": "/services",
+     "permission": "manage_xui", "placeholder": True},
+    {"label_key": "web.nav.xui", "icon": "🖥",
+     "items": [
+         {"label_key": "web.nav.servers", "icon": "🖥", "href": "/servers",
+          "permission": "manage_xui"},
+         {"label_key": "web.nav.inbounds", "icon": "🔌", "href": "/inbounds",
+          "permission": "manage_xui", "placeholder": True},
+     ]},
+    {"label_key": "web.nav.users", "icon": "👥", "href": "/users",
+     "permission": "manage_users", "placeholder": True},
+    {"label_key": "web.nav.settings", "icon": "⚙️", "permission": "manage_settings",
+     "settings_group": True},
+    {"label_key": "web.nav.reports_group", "icon": "📊",
+     "items": [
+         {"label_key": "web.nav.reports", "icon": "📊", "href": "/reports",
+          "permission": "view_dashboard", "placeholder": True},
+         {"label_key": "web.nav.audit_logs", "icon": "📜", "href": "/audit-logs",
+          "permission": "view_audit_log", "placeholder": True},
+     ]},
+]
+
+# Placeholder pages: (path, i18n title key, permission). Real routes are defined
+# explicitly elsewhere; these are the not-yet-built sections referenced by NAV_TREE.
+PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
+    ("/orders", "web.nav.orders", "approve_payments"),
+    ("/payments", "web.nav.payments", "approve_payments"),
+    ("/licenses", "web.nav.licenses", "manage_products"),
+    ("/services", "web.nav.services", "manage_xui"),
+    ("/inbounds", "web.nav.inbounds", "manage_xui"),
+    ("/users", "web.nav.users", "manage_users"),
+    ("/reports", "web.nav.reports", "view_dashboard"),
+    ("/audit-logs", "web.nav.audit_logs", "view_audit_log"),
 ]
 
 
@@ -58,12 +105,89 @@ def _resolve_lang(request: Request) -> str:
     return normalize_lang(request.cookies.get(LANG_COOKIE))
 
 
+def _can(role: object, permission: str | None) -> bool:
+    return permission is None or has_permission(role, permission)
+
+
+def _item_path(href: str) -> str:
+    """The routeable path of an href, dropping any #fragment or ?query."""
+    return href.split("#", 1)[0].split("?", 1)[0]
+
+
+def build_nav(role: object, lang: str, current_path: str) -> list[dict]:
+    """Build the visible, RBAC-filtered navigation tree for the current viewer.
+
+    Returns render-ready sections (labels resolved, active flags set). Groups with
+    no visible sub-items are omitted entirely, as are entries the role can't access.
+    """
+    sections: list[dict] = []
+    for node in NAV_TREE:
+        if node.get("settings_group"):
+            if not _can(role, node.get("permission")):
+                continue
+            items = [
+                {
+                    "label": category_title_for(cat, lang),
+                    "href": f"/settings#{cat}",
+                    "icon": str(meta.get("icon", "•")),
+                    "active": False,  # server can't see the #fragment
+                    "placeholder": False,
+                }
+                for cat, meta in sorted(CATEGORIES.items(), key=lambda kv: kv[1]["order"])
+            ]
+            sections.append({
+                "label": t(node["label_key"], lang),
+                "icon": node["icon"],
+                "href": None,
+                "active": current_path == "/settings",
+                "children": items,
+            })
+            continue
+
+        if "items" in node:
+            items = []
+            for it in node["items"]:
+                if not _can(role, it.get("permission")):
+                    continue
+                items.append({
+                    "label": t(it["label_key"], lang),
+                    "href": it["href"],
+                    "icon": it["icon"],
+                    "active": current_path == _item_path(it["href"]),
+                    "placeholder": bool(it.get("placeholder")),
+                })
+            if not items:
+                continue
+            sections.append({
+                "label": t(node["label_key"], lang),
+                "icon": node["icon"],
+                "href": None,
+                "active": any(i["active"] for i in items),
+                "children": items,
+            })
+            continue
+
+        # Direct link.
+        if not _can(role, node.get("permission")):
+            continue
+        sections.append({
+            "label": t(node["label_key"], lang),
+            "icon": node["icon"],
+            "href": node["href"],
+            "active": current_path == _item_path(node["href"]),
+            "children": [],
+            "placeholder": bool(node.get("placeholder")),
+        })
+    return sections
+
+
 def _ctx(request: Request, admin: Admin | None, **extra: object) -> dict:
     lang = _resolve_lang(request)
+    role = admin.role if admin is not None else None
     return {
         "request": request,
         "admin": admin,
-        "nav": NAV,
+        "nav": build_nav(role, lang, request.url.path),
         "version": __version__,
         "domain": request.url.hostname,
         "lang": lang,
@@ -79,6 +203,36 @@ def _forbidden(lang: str) -> HTMLResponse:
         f"<p>{t('web.forbidden_body', lang)}</p>"
     )
     return HTMLResponse(body, status_code=403)
+
+
+def _make_placeholder(title_key: str, permission: str):
+    """Build a thin, auth+RBAC-gated handler that renders the 'coming soon' shell."""
+
+    async def handler(
+        request: Request,
+        admin: Admin | None = Depends(get_current_admin_optional),
+    ):
+        if admin is None:
+            return RedirectResponse("/login", status_code=302)
+        lang = _resolve_lang(request)
+        if not has_permission(admin.role, permission):
+            return _forbidden(lang)
+        return templates.TemplateResponse(
+            "placeholder.html", _ctx(request, admin, page_title_key=title_key)
+        )
+
+    return handler
+
+
+# Register the not-yet-built sections referenced by NAV_TREE as placeholder pages.
+for _path, _title_key, _perm in PLACEHOLDER_PAGES:
+    router.add_api_route(
+        _path,
+        _make_placeholder(_title_key, _perm),
+        methods=["GET"],
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
 
 
 @router.get("/lang/{code}")

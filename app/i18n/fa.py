@@ -224,4 +224,20 @@ CATALOG: dict[str, str] = {
     "web.servers.not_saved": "ذخیره نشد: {error}",
     "web.servers.tested": "تست اتصال: {message}",
     "web.servers.synced": "{count} اینباند همگام‌سازی شد.",
+
+    # --- navigation shell (grouped sidebar) --------------------------------------
+    "web.nav.sales": "فروش",
+    "web.nav.orders": "سفارش‌ها",
+    "web.nav.payments": "پرداخت‌ها و رسیدها",
+    "web.nav.licenses": "لایسنس‌ها",
+    "web.nav.services": "سرویس‌های V2Ray",
+    "web.nav.xui": "سرورهای 3X-UI (سنایی)",
+    "web.nav.inbounds": "اینباندها",
+    "web.nav.users": "کاربران",
+    "web.nav.reports_group": "گزارش‌ها و لاگ‌ها",
+    "web.nav.reports": "گزارش‌ها",
+    "web.nav.audit_logs": "لاگ‌ها",
+    "web.nav.soon": "به‌زودی",
+    "web.placeholder.body": "این بخش به‌زودی اضافه می‌شود.",
+    "web.placeholder.hint": "رابط کاربری آماده است؛ بخش پشتیبان این قسمت در حال ساخت است.",
 }
