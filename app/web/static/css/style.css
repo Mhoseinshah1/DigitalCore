@@ -110,6 +110,8 @@ textarea { resize: vertical; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: var(--accent-2); }
+.btn.danger { border-color: var(--err); color: #ffc6cc; }
+.btn.danger:hover { background: rgba(255,92,108,.12); border-color: var(--err); }
 .btn.full { width: 100%; }
 
 /* Settings */

@@ -12,6 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
@@ -30,8 +31,11 @@ from app.database import get_session
 from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
 from app.models.product import PRODUCT_TYPES
+from app.models.xui_inbound import XuiInbound
 from app.schemas.product import ProductCreate, ProductUpdate
-from app.services import product_service
+from app.services import product_service, xui_service
+from app.xui.exceptions import XuiError
+from app.xui.registry import SUPPORTED_VERSIONS
 from app.web.api.auth import authenticate_admin
 from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
 
@@ -45,6 +49,7 @@ LANG_COOKIE = "dc_lang"
 NAV = [
     {"href": "/", "label_key": "web.nav.dashboard", "icon": "🏠"},
     {"href": "/products", "label_key": "web.nav.products", "icon": "📦"},
+    {"href": "/servers", "label_key": "web.nav.servers", "icon": "🖥"},
     {"href": "/settings", "label_key": "web.nav.settings", "icon": "⚙️"},
 ]
 
@@ -377,6 +382,160 @@ async def product_toggle_hidden(
         )
         await session.commit()
     return RedirectResponse("/products?saved=1", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# 3X-UI servers (manage_xui RBAC)
+# --------------------------------------------------------------------------
+
+async def _inbound_counts(session: AsyncSession) -> dict[int, int]:
+    """Map server_id -> number of synced inbounds."""
+    result = await session.execute(
+        select(XuiInbound.server_id, func.count(XuiInbound.id)).group_by(
+            XuiInbound.server_id
+        )
+    )
+    return {server_id: count for server_id, count in result.all()}
+
+
+@router.get("/servers", response_class=HTMLResponse)
+async def servers_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: int = 0,
+    error: str = "",
+    tested: str = "",
+    synced: str = "",
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(lang)
+    servers = await xui_service.list_servers(session)
+    counts = await _inbound_counts(session)
+    return templates.TemplateResponse(
+        "servers.html",
+        _ctx(
+            request,
+            admin,
+            servers=servers,
+            counts=counts,
+            saved=bool(saved),
+            error=error,
+            tested=tested,
+            synced=synced,
+        ),
+    )
+
+
+@router.get("/servers/new", response_class=HTMLResponse)
+async def server_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(lang)
+    return templates.TemplateResponse(
+        "server_form.html",
+        _ctx(request, admin, versions=SUPPORTED_VERSIONS, error=""),
+    )
+
+
+@router.post("/servers/new")
+async def server_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(_resolve_lang(request))
+    form = dict(await request.form())
+    web_base_path = str(form.get("web_base_path", "")).strip() or None
+    api_token = str(form.get("api_token", "")).strip() or None
+    try:
+        await xui_service.add_server(
+            session,
+            name=str(form.get("name", "")).strip(),
+            base_url=str(form.get("base_url", "")).strip(),
+            username=str(form.get("username", "")).strip(),
+            password=str(form.get("password", "")),
+            web_base_path=web_base_path,
+            panel_version=str(form.get("panel_version", "2.9.4")).strip(),
+            api_token=api_token,
+            actor_type="admin",
+            actor_id=admin.id,
+        )
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(f"/servers?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/servers?saved=1", status_code=303)
+
+
+@router.post("/servers/{server_id}/test")
+async def server_test_connection(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(lang)
+    server = await xui_service.get_server(session, server_id)
+    if server is None:
+        return RedirectResponse("/servers", status_code=303)
+    result = await xui_service.test_connection(session, server)
+    message = str(result.get("message", ""))
+    return RedirectResponse(
+        f"/servers?tested={quote(message)}", status_code=303
+    )
+
+
+@router.post("/servers/{server_id}/sync")
+async def server_sync_inbounds(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(lang)
+    server = await xui_service.get_server(session, server_id)
+    if server is None:
+        return RedirectResponse("/servers", status_code=303)
+    try:
+        count = await xui_service.sync_inbounds(session, server)
+    except XuiError as exc:
+        return RedirectResponse(f"/servers?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/servers?synced={count}", status_code=303)
+
+
+@router.post("/servers/{server_id}/delete")
+async def server_delete(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_xui"):
+        return _forbidden(_resolve_lang(request))
+    await xui_service.delete_server(
+        session, server_id, actor_type="admin", actor_id=admin.id
+    )
+    return RedirectResponse("/servers?saved=1", status_code=303)
 
 
 @router.post("/settings")

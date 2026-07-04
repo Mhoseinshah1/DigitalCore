@@ -25,6 +25,7 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_dashboard",
         "broadcast",
         "manage_products",
+        "manage_xui",
         "manage_admins",
         "view_audit_log",
     }
@@ -40,6 +41,7 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_dashboard",
             "broadcast",
             "manage_products",
+            "manage_xui",
             "view_audit_log",
         }
     ),
