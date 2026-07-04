@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.products.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.products.title") }}</h1>
+  <p class="muted">{{ _("web.products.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.products.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.products.not_saved", error=error) }}</div>{% endif %}
+
+<p><a class="btn primary" href="/products/new">➕ {{ _("web.products.add") }}</a></p>
+
+{% if not products %}
+<section class="note"><p class="muted">{{ _("web.products.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.products.col.title") }}</th>
+          <th>{{ _("web.products.col.type") }}</th>
+          <th>{{ _("web.products.col.price") }}</th>
+          <th>{{ _("web.products.col.specs") }}</th>
+          <th>{{ _("web.products.col.status") }}</th>
+          <th>{{ _("web.products.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td>{{ p.title }}</td>
+          <td>{{ _("product.type." ~ p.type) }}</td>
+          <td>{{ _("product.price_fmt", price="{:,}".format(p.price)) }}</td>
+          <td class="muted">
+            {% if p.type == "v2ray" %}
+              {{ _("product.duration_fmt", days=p.duration_days) }} ·
+              {{ _("product.traffic_fmt", gb=p.traffic_gb) }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            {% if not p.is_active %}<span class="pill">{{ _("product.state.inactive") }}</span>
+            {% elif p.is_hidden %}<span class="pill">{{ _("product.state.hidden") }}</span>
+            {% else %}<span class="pill ok">{{ _("product.state.active") }}</span>{% endif %}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/products/{{ p.id }}/edit">{{ _("web.products.edit") }}</a>
+            <form method="post" action="/products/{{ p.id }}/toggle-active">
+              <button type="submit" class="btn small" title="{{ _('web.products.toggle_active') }}">🔁</button>
+            </form>
+            <form method="post" action="/products/{{ p.id }}/toggle-hidden">
+              <button type="submit" class="btn small" title="{{ _('web.products.toggle_hidden') }}">👁</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

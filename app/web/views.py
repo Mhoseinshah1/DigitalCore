@@ -29,6 +29,9 @@ from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
 from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
+from app.models.product import PRODUCT_TYPES
+from app.schemas.product import ProductCreate, ProductUpdate
+from app.services import product_service
 from app.web.api.auth import authenticate_admin
 from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
 
@@ -41,6 +44,7 @@ LANG_COOKIE = "dc_lang"
 
 NAV = [
     {"href": "/", "label_key": "web.nav.dashboard", "icon": "🏠"},
+    {"href": "/products", "label_key": "web.nav.products", "icon": "📦"},
     {"href": "/settings", "label_key": "web.nav.settings", "icon": "⚙️"},
 ]
 
@@ -198,6 +202,181 @@ async def settings_page(
         "settings.html",
         _ctx(request, admin, sections=sections, saved=bool(saved), error=error),
     )
+
+
+# --------------------------------------------------------------------------
+# Products (manage_products RBAC)
+# --------------------------------------------------------------------------
+
+def _parse_int_opt(raw: object) -> int | None:
+    text = str(raw or "").strip()
+    if text == "":
+        return None
+    return int(text)  # ValueError surfaces to the caller's error handling
+
+
+def _product_form_values(form: dict[str, object]) -> dict[str, object]:
+    """Convert the HTML form payload into ProductCreate/Update field values."""
+    return {
+        "type": str(form.get("type", "")).strip(),
+        "title": str(form.get("title", "")).strip(),
+        "description": (str(form.get("description", "")).strip() or None),
+        "price": _parse_int_opt(form.get("price")) or 0,
+        "duration_days": _parse_int_opt(form.get("duration_days")),
+        "traffic_gb": _parse_int_opt(form.get("traffic_gb")),
+        "ip_limit": _parse_int_opt(form.get("ip_limit")),
+        "server_id": _parse_int_opt(form.get("server_id")),
+        "inbound_id": _parse_int_opt(form.get("inbound_id")),
+        "is_active": "is_active" in form,
+        "is_hidden": "is_hidden" in form,
+        "sort_order": _parse_int_opt(form.get("sort_order")) or 0,
+    }
+
+
+@router.get("/products", response_class=HTMLResponse)
+async def products_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: int = 0,
+    error: str = "",
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(lang)
+    products = await product_service.list_for_admin(session)
+    return templates.TemplateResponse(
+        "products.html",
+        _ctx(request, admin, products=products, saved=bool(saved), error=error),
+    )
+
+
+@router.get("/products/new", response_class=HTMLResponse)
+async def product_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(lang)
+    return templates.TemplateResponse(
+        "product_form.html",
+        _ctx(request, admin, product=None, product_types=PRODUCT_TYPES, error=""),
+    )
+
+
+@router.post("/products/new")
+async def product_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(_resolve_lang(request))
+    form = dict(await request.form())
+    try:
+        data = ProductCreate(**_product_form_values(form))
+        await product_service.create(
+            session, data, actor_type="admin", actor_id=admin.id
+        )
+        await session.commit()
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(f"/products?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/products?saved=1", status_code=303)
+
+
+@router.get("/products/{product_id}/edit", response_class=HTMLResponse)
+async def product_edit_page(
+    product_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(lang)
+    product = await product_service.get(session, product_id)
+    if product is None:
+        return RedirectResponse("/products", status_code=302)
+    return templates.TemplateResponse(
+        "product_form.html",
+        _ctx(request, admin, product=product, product_types=PRODUCT_TYPES, error=""),
+    )
+
+
+@router.post("/products/{product_id}/edit")
+async def product_edit_submit(
+    product_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(_resolve_lang(request))
+    form = dict(await request.form())
+    try:
+        data = ProductUpdate(**_product_form_values(form))
+        product = await product_service.update(
+            session, product_id, data, actor_type="admin", actor_id=admin.id
+        )
+        await session.commit()
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(f"/products?error={quote(str(exc))}", status_code=303)
+    if product is None:
+        return RedirectResponse("/products", status_code=302)
+    return RedirectResponse("/products?saved=1", status_code=303)
+
+
+@router.post("/products/{product_id}/toggle-active")
+async def product_toggle_active(
+    product_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(_resolve_lang(request))
+    product = await product_service.get(session, product_id)
+    if product is not None:
+        await product_service.set_active(
+            session, product_id, not product.is_active,
+            actor_type="admin", actor_id=admin.id,
+        )
+        await session.commit()
+    return RedirectResponse("/products?saved=1", status_code=303)
+
+
+@router.post("/products/{product_id}/toggle-hidden")
+async def product_toggle_hidden(
+    product_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_products"):
+        return _forbidden(_resolve_lang(request))
+    product = await product_service.get(session, product_id)
+    if product is not None:
+        await product_service.set_hidden(
+            session, product_id, not product.is_hidden,
+            actor_type="admin", actor_id=admin.id,
+        )
+        await session.commit()
+    return RedirectResponse("/products?saved=1", status_code=303)
 
 
 @router.post("/settings")
