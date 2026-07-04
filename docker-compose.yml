@@ -63,6 +63,18 @@ services:
       backend:
         condition: service_healthy
 
+  worker:
+    build: .
+    image: digitalcore:latest
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

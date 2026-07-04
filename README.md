@@ -7,9 +7,13 @@ features are added.
 ## Phase status
 
 - **Phase 0 — done.** Repository, Docker Compose skeleton, first installer.
-- **Phase 1 — current.** Runnable backend with health/readiness, database
+- **Phase 1 — done.** Runnable backend with health/readiness, database
   migrations, admin bootstrap, minimal admin auth API, basic bot connectivity,
   installer/management/smoke scripts, and CI.
+- **Phase R — current.** Foundation hardening: fix the crypto/config key gap,
+  add the Redis client, structured logging, a worker entrypoint, empty service
+  packages, runtime `storage/` dirs, and a pytest test baseline. `/ready` now
+  checks the database **and** Redis. No behaviour change to existing features.
 - **Phase 2 — planned.** Admin panel, users management, bot database
   registration, role-based permissions, first business modules.
 
@@ -23,9 +27,33 @@ features are added.
 |-----------|------|
 | Backend API | FastAPI + Uvicorn (service name: `backend`) |
 | Bot | aiogram 3 (long polling) |
+| Worker | thin async loop (heartbeat; scaffolding) |
 | Database | PostgreSQL 16 (async SQLAlchemy 2 + Alembic) |
-| Cache | Redis 7 (present; not required by Phase 1 code) |
-| Runtime | Docker Compose (single image: `backend` + `bot`) |
+| Cache | Redis 7 (client wired; `/ready` pings it) |
+| Runtime | Docker Compose (single image: `backend` + `bot` + `worker`) |
+
+## Project structure
+
+```
+app/
+  bot/        Telegram entrypoint (thin) + handlers/
+  web/        FastAPI backend + admin panel
+  worker/     background worker entrypoint (thin async loop)
+  services/   ALL business logic lives here
+  schemas/    Pydantic DTOs
+  models/     SQLAlchemy ORM models
+  xui/        3X-UI integration (only here)
+  utils/      small shared helpers
+  core/       crypto, security, logging, redis, settings service
+  config.py   configuration      database.py  async engine/session
+migrations/   Alembic
+scripts/      install.sh, manage.sh, smoke-test.sh, create_admin.py, entrypoint.sh
+storage/      runtime dirs: receipts/ backups/ exports/ logs/ temp/
+tests/        pytest suite
+```
+
+Handlers/routes stay thin (parse → call a service → format). Config and the DB
+engine live at `app/config.py` and `app/database.py` (not under `app/core/`).
 
 ## Requirements
 
@@ -49,11 +77,11 @@ curl -fsS http://localhost:8000/ready
 Expected results:
 
 ```json
-// GET /health
+// GET /health   (liveness — no DB/Redis dependency)
 {"status": "ok", "service": "DigitalCore API", "version": "0.1.0"}
 
-// GET /ready
-{"status": "ready", "database": "ok"}
+// GET /ready    (readiness — 503 if the DB or Redis is down)
+{"status": "ready", "database": "ok", "redis": "ok"}
 ```
 
 ## Installer v0
@@ -83,6 +111,29 @@ cp .env.example .env
 alembic upgrade head
 python scripts/create_admin.py
 uvicorn app.web.main:app --reload --port 8000
+```
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Tests use an in-memory SQLite database by default; set `TEST_DATABASE_URL` to a
+Postgres DSN to run against Postgres instead. The full local check is:
+
+```bash
+python -m compileall app migrations tests
+python -m pytest -q
+bash -n scripts/*.sh
+docker compose config
+```
+
+The background worker can be run directly:
+
+```bash
+python -m app.worker.main    # logs a heartbeat every ~30s; Ctrl-C to stop
 ```
 
 ## Common commands
@@ -137,33 +188,12 @@ clear message and exits cleanly when the token is missing.
 - **Backend health failed** — inspect containers and logs:
   `docker ps -a` and `docker compose logs backend --tail=200`. A common cause is
   the port `8000` already being in use.
-- **Database not ready (`/ready` returns 503)** — Postgres may still be starting;
-  wait and retry. Check `docker compose logs postgres` and confirm `DATABASE_URL`
-  in `.env` matches the `postgres` service credentials.
+- **Not ready (`/ready` returns 503)** — `/ready` checks both Postgres and Redis.
+  The JSON body shows which is down (`"database"`/`"redis": "error"`). Postgres or
+  Redis may still be starting; wait and retry. Check `docker compose logs postgres`
+  / `docker compose logs redis` and confirm `DATABASE_URL` / `REDIS_URL` in `.env`.
 - **Telegram token missing** — expected in Phase 1. The backend is unaffected;
   the `bot` container exits cleanly (code 0) and will not restart-loop. Set
   `TELEGRAM_BOT_TOKEN` in `.env` and `docker compose up -d bot` to enable it.
 
-## Layout
-
-```
-docker-compose.yml         postgres, redis, backend, bot
-Dockerfile                 single image for backend + bot
-.env.example               environment template (safe to commit)
-app/
-  config.py                settings loader
-  database.py              async SQLAlchemy engine/session
-  models/                  Admin, User, Setting
-  core/security.py         bcrypt + JWT
-  web/main.py              FastAPI app: /health, /ready
-  web/api/auth.py          /api/auth/login, /api/auth/me
-  bot/main.py              aiogram bot: /start, /ping
-migrations/                Alembic (0001_initial: admins, users, settings)
-scripts/
-  install.sh               installer v0
-  manage.sh                status/logs/restart/down/health
-  smoke-test.sh            full happy-path check
-  create_admin.py          super-admin bootstrap
-  entrypoint.sh            container role selector
-.github/workflows/ci.yml   syntax + compose config checks
-```
+See **Project structure** near the top of this document for the directory layout.

@@ -15,8 +15,12 @@ venv/
 
 # Data / logs
 *.log
-data/
-backups/
+/data/
+/backups/
+
+# Runtime storage: keep the folders (via .gitkeep), ignore their contents
+storage/*/*
+!storage/*/.gitkeep
 
 # OS / editor
 .DS_Store

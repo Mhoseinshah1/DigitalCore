@@ -13,13 +13,14 @@ import asyncio
 import logging
 import sys
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 
 from app.config import settings
+from app.core.logging import configure_logging
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+configure_logging()
 log = logging.getLogger("bot")
 
 dp = Dispatcher()

@@ -26,6 +26,10 @@ case "$ROLE" in
         echo "==> Starting Telegram bot…"
         exec python -m app.bot.main
         ;;
+    worker)
+        echo "==> Starting background worker…"
+        exec python -m app.worker.main
+        ;;
     migrate)
         wait_for_db
         exec alembic upgrade head
@@ -39,7 +43,7 @@ case "$ROLE" in
         ;;
     *)
         echo "Unknown service role: $ROLE" >&2
-        echo "Valid roles: backend | bot | migrate | create-admin | shell" >&2
+        echo "Valid roles: backend | bot | worker | migrate | create-admin | shell" >&2
         exit 64
         ;;
 esac

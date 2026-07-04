@@ -37,6 +37,19 @@ class Settings(BaseSettings):
     # --- Cache ---
     REDIS_URL: str = "redis://redis:6379/0"
 
+    # --- Secrets / crypto ---
+    # SECRET_KEY seeds the Fernet fallback in app/core/crypto.py; FERNET_KEY, when
+    # set, is used directly. BACKUP_ENCRYPTION_KEY and WEB_PANEL_URL are consumed
+    # by later phases but are declared here so the config resolves and the app
+    # boots even when they are blank.
+    SECRET_KEY: str = "change_me"
+    FERNET_KEY: str = ""
+    BACKUP_ENCRYPTION_KEY: str = ""
+    WEB_PANEL_URL: str = ""
+
+    # --- Logging ---
+    LOG_LEVEL: str = "INFO"
+
     # --- Auth / admin bootstrap ---
     JWT_SECRET: str = "change_me"
     ADMIN_EMAIL: str = "admin@example.com"

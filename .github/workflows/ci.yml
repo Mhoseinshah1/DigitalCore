@@ -19,7 +19,7 @@ jobs:
 
       - name: Python syntax check
         run: |
-          python -m compileall -q app scripts migrations
+          python -m compileall -q app scripts migrations tests
 
       - name: Shell syntax checks
         run: |
@@ -28,6 +28,15 @@ jobs:
           bash -n scripts/smoke-test.sh
           bash -n scripts/entrypoint.sh
           bash -n install.sh
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest -q
 
       - name: Validate docker compose config
         run: |
