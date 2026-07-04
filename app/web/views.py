@@ -14,13 +14,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
-from app.core.defaults import CATEGORIES, DEFAULTS
+from app.core.defaults import CATEGORIES, DEFAULTS, DEFAULTS_BY_KEY
 from app.core.security import create_access_token
 from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
 from app.models.admin import Admin
-from app.web.api.auth import _authenticate
-from app.web.deps import COOKIE_NAME, current_admin, set_session_cookie
+from app.web.api.auth import authenticate_admin
+from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -45,7 +45,7 @@ def _ctx(request: Request, admin: Admin | None, **extra) -> dict:
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, admin: Admin | None = Depends(current_admin)):
+async def login_page(request: Request, admin: Admin | None = Depends(get_current_admin_optional)):
     if admin is not None:
         return RedirectResponse("/", status_code=302)
     return templates.TemplateResponse("login.html", _ctx(request, None, error=None))
@@ -58,16 +58,17 @@ async def login_submit(
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ):
-    admin = await _authenticate(session, username, password)
+    # The form field is historically named "username"; the value is the admin email.
+    admin = await authenticate_admin(session, username, password)
     if admin is None:
         return templates.TemplateResponse(
             "login.html",
             _ctx(request, None, error="Invalid username or password."),
             status_code=401,
         )
-    token = create_access_token(admin.id, is_owner=admin.is_owner)
+    token = create_access_token(admin.id, email=admin.email)
     resp = RedirectResponse("/", status_code=302)
-    set_session_cookie(resp, token)
+    set_session_cookie(resp, token, request=request)
     return resp
 
 
@@ -81,7 +82,7 @@ async def logout():
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
-    admin: Admin | None = Depends(current_admin),
+    admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
 ):
     if admin is None:
@@ -90,7 +91,9 @@ async def dashboard(
     rows = await svc.all_rows()
     counts: dict[str, int] = {}
     for row in rows:
-        counts[row.category] = counts.get(row.category, 0) + 1
+        meta = DEFAULTS_BY_KEY.get(row.key)
+        category = meta.category if meta else "general"
+        counts[category] = counts.get(category, 0) + 1
     cats = [
         {**meta, "category": cat, "count": counts.get(cat, 0)}
         for cat, meta in sorted(CATEGORIES.items(), key=lambda kv: kv[1]["order"])
@@ -103,7 +106,7 @@ async def dashboard(
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,
-    admin: Admin | None = Depends(current_admin),
+    admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
     saved: int = 0,
 ):
@@ -124,7 +127,7 @@ async def settings_page(
             elif row is None:
                 value = coerce_out(d.value_type, d.default)
             else:
-                value = coerce_out(row.value_type, row.value)
+                value = coerce_out(d.value_type, row.value)
             items.append(
                 {
                     "key": d.key,
@@ -147,7 +150,7 @@ async def settings_page(
 @router.post("/settings")
 async def settings_submit(
     request: Request,
-    admin: Admin | None = Depends(current_admin),
+    admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
 ):
     if admin is None:

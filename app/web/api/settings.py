@@ -1,7 +1,9 @@
 """JSON settings API for the web panel.
 
 All business settings are read and written here. The installer never touches
-these — they exist so the owner can configure the business after boot.
+these — they exist so the owner can configure the business after boot. Display
+metadata (category, type, label) comes from the code catalog in
+app/core/defaults.py; the database stores only key/value/is_secret.
 """
 from __future__ import annotations
 
@@ -11,20 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.defaults import CATEGORIES, DEFAULTS_BY_KEY
+from app.core.defaults import CATEGORIES, DEFAULTS, DEFAULTS_BY_KEY
 from app.core.settings_service import SettingsService, coerce_out
-from app.core import crypto
 from app.database import get_session
 from app.models.admin import Admin
-from app.web.deps import current_admin
+from app.web.deps import get_current_admin
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-
-def _require_admin(admin: Admin | None) -> Admin:
-    if admin is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
-    return admin
 
 
 class UpdateRequest(BaseModel):
@@ -33,34 +28,57 @@ class UpdateRequest(BaseModel):
 
 @router.get("")
 async def list_settings(
-    admin: Admin | None = Depends(current_admin),
+    admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    _require_admin(admin)
     svc = SettingsService(session)
-    rows = await svc.all_rows()
+    rows = {r.key: r for r in await svc.all_rows()}
 
     grouped: dict[str, dict[str, Any]] = {}
     for cat, meta in sorted(CATEGORIES.items(), key=lambda kv: kv[1]["order"]):
         grouped[cat] = {**meta, "category": cat, "items": []}
 
-    for row in sorted(rows, key=lambda r: r.key):
-        if row.is_secret:
-            display: Any = "" if not row.value else "********"
+    # Catalog first, overlaying stored rows — a fresh install reports the same
+    # defaults the HTML settings page shows instead of an empty list.
+    for d in DEFAULTS:
+        row = rows.pop(d.key, None)
+        if d.is_secret or (row is not None and row.is_secret):
+            has_value = bool(row and row.value)
+            display: Any = "********" if has_value else ""
+        elif row is None:
+            display = coerce_out(d.value_type, d.default)
         else:
-            display = coerce_out(row.value_type, row.value)
+            display = coerce_out(d.value_type, row.value)
         entry = {
-            "key": row.key,
+            "key": d.key,
             "value": display,
-            "value_type": row.value_type,
-            "is_secret": row.is_secret,
-            "label": row.label,
-            "description": row.description,
+            "value_type": d.value_type,
+            "is_secret": d.is_secret,
+            "label": d.label or d.key,
+            "description": d.description,
         }
         grouped.setdefault(
-            row.category,
-            {"title": row.category.title(), "order": 99, "category": row.category, "items": []},
+            d.category,
+            {"title": d.category.title(), "order": 99, "category": d.category, "items": []},
         )["items"].append(entry)
+
+    # Any remaining DB rows with keys outside the catalog (legacy/unknown).
+    for key in sorted(rows):
+        row = rows[key]
+        display = ("********" if row.value else "") if row.is_secret else coerce_out("string", row.value)
+        grouped.setdefault(
+            "general",
+            {"title": "General", "order": 99, "category": "general", "items": []},
+        )["items"].append(
+            {
+                "key": key,
+                "value": display,
+                "value_type": "string",
+                "is_secret": row.is_secret,
+                "label": key,
+                "description": "",
+            }
+        )
 
     return {"categories": [g for g in grouped.values() if g["items"]]}
 
@@ -68,10 +86,9 @@ async def list_settings(
 @router.put("")
 async def update_settings(
     body: UpdateRequest,
-    admin: Admin | None = Depends(current_admin),
+    admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    _require_admin(admin)
     unknown = [k for k in body.values if k not in DEFAULTS_BY_KEY]
     if unknown:
         raise HTTPException(

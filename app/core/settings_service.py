@@ -1,4 +1,10 @@
-"""Read/write access to business settings stored in the database."""
+"""Read/write access to business settings stored in the database.
+
+The settings table stores only (key, value, is_secret); display/type metadata
+(category, value_type, label, description) lives in the code catalog at
+app/core/defaults.py and is looked up by key. Secret-flagged values are stored
+encrypted at rest (see app/core/crypto.py).
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -39,6 +45,16 @@ def coerce_in(value_type: str, value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def meta_for(key: str) -> SettingDef | None:
+    """Catalog metadata for a settings key (None for unknown keys)."""
+    return DEFAULTS_BY_KEY.get(key)
+
+
+def value_type_for(key: str) -> str:
+    meta = meta_for(key)
+    return meta.value_type if meta else "string"
+
+
 class SettingsService:
     """Thin helper around the settings table."""
 
@@ -46,14 +62,15 @@ class SettingsService:
         self.session = session
 
     async def get_raw(self, key: str) -> Setting | None:
-        return await self.session.get(Setting, key)
+        result = await self.session.execute(select(Setting).where(Setting.key == key))
+        return result.scalar_one_or_none()
 
     async def get(self, key: str, default: Any = None) -> Any:
         row = await self.get_raw(key)
         if row is None:
             return default
         stored = crypto.decrypt(row.value) if row.is_secret else row.value
-        return coerce_out(row.value_type, stored)
+        return coerce_out(value_type_for(key), stored)
 
     async def all_rows(self) -> list[Setting]:
         result = await self.session.execute(select(Setting))
@@ -67,21 +84,17 @@ class SettingsService:
                 out[row.key] = "" if not row.value else "********"
                 continue
             stored = crypto.decrypt(row.value) if row.is_secret else row.value
-            out[row.key] = coerce_out(row.value_type, stored)
+            out[row.key] = coerce_out(value_type_for(row.key), stored)
         return out
 
     async def set(self, key: str, value: Any) -> Setting:
+        meta = meta_for(key)
         row = await self.get_raw(key)
         if row is None:
-            # Unknown key: fall back to catalog metadata if we have it.
-            meta: SettingDef | None = DEFAULTS_BY_KEY.get(key)
             row = Setting(
                 key=key,
-                category=meta.category if meta else "general",
-                value_type=meta.value_type if meta else "string",
+                value="",
                 is_secret=meta.is_secret if meta else False,
-                label=meta.label if meta else key,
-                description=meta.description if meta else "",
             )
             self.session.add(row)
 
@@ -89,7 +102,7 @@ class SettingsService:
         if row.is_secret and isinstance(value, str) and value == "********":
             return row
 
-        stored = coerce_in(row.value_type, value)
+        stored = coerce_in(meta.value_type if meta else "string", value)
         row.value = crypto.encrypt(stored) if row.is_secret else stored
         return row
 

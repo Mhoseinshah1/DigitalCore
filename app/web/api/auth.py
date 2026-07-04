@@ -31,14 +31,28 @@ class AdminOut(BaseModel):
     is_super_admin: bool
 
 
+async def authenticate_admin(
+    session: AsyncSession, email: str, password: str
+) -> Admin | None:
+    """Check email + password against the admins table; None on any failure.
+
+    Shared by the JSON login endpoint and the panel's HTML login form.
+    """
+    email = (email or "").strip()
+    result = await session.execute(select(Admin).where(Admin.email == email))
+    admin = result.scalar_one_or_none()
+    if admin is None or not admin.is_active or not verify_password(password, admin.password_hash):
+        return None
+    return admin
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    result = await session.execute(select(Admin).where(Admin.email == str(body.email)))
-    admin = result.scalar_one_or_none()
-    if admin is None or not admin.is_active or not verify_password(body.password, admin.password_hash):
+    admin = await authenticate_admin(session, str(body.email), body.password)
+    if admin is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
     token = create_access_token(admin.id, email=admin.email)
     return TokenResponse(access_token=token)
