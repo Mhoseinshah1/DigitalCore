@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang }}" dir="{{ 'rtl' if rtl else 'ltr' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,13 +14,18 @@
     <nav>
       {% for item in nav %}
       <a class="nav-link {% if request.url.path == item.href %}active{% endif %}" href="{{ item.href }}">
-        <span class="nav-ico">{{ item.icon }}</span> {{ item.label }}
+        <span class="nav-ico">{{ item.icon }}</span> {{ _(item.label_key) }}
       </a>
       {% endfor %}
     </nav>
+    <div class="lang-switch">
+      <a href="/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
+      <span>·</span>
+      <a href="/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
+    </div>
     <div class="sidebar-foot">
-      <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · owner{% endif %}</div>
-      <a class="logout" href="/logout">Log out</a>
+      <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · {{ _("web.owner_badge") }}{% endif %}</div>
+      <a class="logout" href="/logout">{{ _("web.logout") }}</a>
       <div class="ver">v{{ version }}</div>
     </div>
   </aside>

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.bot.middlewares.maintenance import MAINTENANCE_MESSAGE, MaintenanceMiddleware
+from app.bot.middlewares.maintenance import MaintenanceMiddleware
 from app.core.permissions import Role
+from app.i18n import DEFAULT_LANG, t
+
+MAINTENANCE_MESSAGE = t("maintenance.active", DEFAULT_LANG)
 
 
 def _flag(value: bool):

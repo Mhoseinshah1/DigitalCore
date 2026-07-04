@@ -24,6 +24,11 @@ class User(Base, TimestampMixin):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # UI language (fa/en); fa is the platform default.
+    language: Mapped[str] = mapped_column(
+        String(5), default="fa", server_default="fa", nullable=False
+    )
+
     # Self-referential: the user who invited this one (referral system, later phase).
     referrer_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", name="fk_users_referrer_id_users"), nullable=True

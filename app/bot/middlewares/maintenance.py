@@ -17,10 +17,9 @@ from aiogram.types import TelegramObject
 from app.core.permissions import Role
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
+from app.i18n import DEFAULT_LANG, t
 
 log = logging.getLogger("bot.maintenance")
-
-MAINTENANCE_MESSAGE = "🛠 The bot is under maintenance. Please try again later."
 
 
 async def _read_flag_from_db() -> bool:
@@ -47,8 +46,10 @@ class MaintenanceMiddleware(BaseMiddleware):
         if not maintenance_on or data.get("role") == Role.OWNER:
             return await handler(event, data)
 
+        # Use the per-user translator when the language middleware ran first.
+        translate = data.get("_") or (lambda key, **p: t(key, DEFAULT_LANG, **p))
         answer = getattr(event, "answer", None)
         if callable(answer):
             with suppress(Exception):
-                await answer(MAINTENANCE_MESSAGE)
+                await answer(translate("maintenance.active"))
         return None

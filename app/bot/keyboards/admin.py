@@ -1,21 +1,23 @@
-"""Admin main menu."""
+"""Admin main menu (built per-language)."""
 from __future__ import annotations
 
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
-BTN_DASHBOARD = "📊 Dashboard"
-BTN_USERS = "👥 Users"
-BTN_BROADCAST = "📢 Broadcast"
-BTN_SETTINGS = "⚙️ Settings"
-BTN_BACK_TO_USER = "⬅️ User menu"
+from app.i18n import t
 
 
-def admin_main_menu() -> ReplyKeyboardMarkup:
+def admin_main_menu(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_DASHBOARD), KeyboardButton(text=BTN_USERS)],
-            [KeyboardButton(text=BTN_BROADCAST), KeyboardButton(text=BTN_SETTINGS)],
-            [KeyboardButton(text=BTN_BACK_TO_USER)],
+            [
+                KeyboardButton(text=t("btn.admin.dashboard", lang)),
+                KeyboardButton(text=t("btn.admin.users", lang)),
+            ],
+            [
+                KeyboardButton(text=t("btn.admin.broadcast", lang)),
+                KeyboardButton(text=t("btn.admin.settings", lang)),
+            ],
+            [KeyboardButton(text=t("btn.admin.back", lang))],
         ],
         resize_keyboard=True,
     )

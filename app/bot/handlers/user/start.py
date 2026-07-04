@@ -2,26 +2,27 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from app.core.permissions import Role
+from app.bot.handlers.user.language import language_picker_keyboard
+from app.bot.keyboards.user import user_main_menu
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
-from app.bot.keyboards.user import user_main_menu
 from app.services import audit_service, user_service
 
 log = logging.getLogger("bot.start")
 
 router = Router(name="user.start")
 
-DEFAULT_START_TEXT = "👋 Welcome to DigitalCore!"
-
 
 @router.message(CommandStart())
-async def on_start(message: Message, role: Role | None = None) -> None:
+async def on_start(
+    message: Message, _: Callable[..., str], lang: str = "fa", is_admin: bool = False
+) -> None:
     tg_user = message.from_user
     if tg_user is None:
         return
@@ -43,11 +44,19 @@ async def on_start(message: Message, role: Role | None = None) -> None:
                 target_type="user",
                 target_id=user.id,
             )
-        start_text = await SettingsService(session).get("start_text", "") or DEFAULT_START_TEXT
+        start_text = await SettingsService(session).get_str("start_text", "")
 
-    await message.answer(start_text, reply_markup=user_main_menu(is_admin=role is not None))
+    if created:
+        # New user: pick a language first; the menu follows in that language.
+        await message.answer(_("lang.pick"), reply_markup=language_picker_keyboard())
+        return
+
+    await message.answer(
+        start_text or _("greeting"),
+        reply_markup=user_main_menu(lang, is_admin=is_admin),
+    )
 
 
 @router.message(Command("ping"))
-async def on_ping(message: Message) -> None:
-    await message.answer("✅ pong — DigitalCore bot is running.")
+async def on_ping(message: Message, _: Callable[..., str]) -> None:
+    await message.answer(_("ping"))

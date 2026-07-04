@@ -35,6 +35,30 @@ async def test_get_by_telegram_id(db_session) -> None:
     assert await user_service.get_by_telegram_id(db_session, 999999) is None
 
 
+async def test_language_defaults_to_fa_and_persists(db_session) -> None:
+    from app.i18n import t
+
+    user, _created = await user_service.register_or_update_user(db_session, telegram_id=1010)
+    assert user.language == "fa"
+    assert t("greeting", user.language) == t("greeting", "fa")
+
+    updated = await user_service.set_language(db_session, 1010, "en")
+    assert updated is not None and updated.language == "en"
+    refetched = await user_service.get_by_telegram_id(db_session, 1010)
+    assert refetched is not None and refetched.language == "en"
+    # Bot output switches with the stored language.
+    assert t("greeting", refetched.language) == "👋 Welcome to DigitalCore!"
+
+
+async def test_set_language_rejects_unsupported(db_session) -> None:
+    import pytest as _pytest
+
+    await user_service.register_or_update_user(db_session, telegram_id=1011)
+    with _pytest.raises(ValueError):
+        await user_service.set_language(db_session, 1011, "de")
+    assert await user_service.set_language(db_session, 999999, "en") is None
+
+
 async def test_block_unblock(db_session) -> None:
     await user_service.register_or_update_user(db_session, telegram_id=1003)
     blocked = await user_service.block_user(db_session, 1003)

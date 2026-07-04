@@ -1,3 +1,19 @@
+/* Vazirmatn — shipped locally (no CDN); covers both Persian and Latin glyphs. */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/static/fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/static/fonts/Vazirmatn-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #0f1216;
   --panel: #171b22;
@@ -17,7 +33,7 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 15px/1.7 "Vazirmatn", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -119,6 +135,18 @@ textarea { resize: vertical; }
 .switch-label { font-size: .95rem; color: var(--text); }
 
 .form-actions { position: sticky; bottom: 0; padding: 1rem 0; background: linear-gradient(transparent, var(--bg) 40%); }
+
+/* Language switcher */
+.lang-switch { font-size: .85rem; color: var(--muted); display: flex; gap: .4rem; align-items: center; }
+.lang-switch.center { justify-content: center; margin-top: .35rem; }
+.lang-switch a { color: var(--muted); }
+.lang-switch a.active { color: var(--accent); font-weight: 700; }
+
+/* RTL (fa): direction comes from <html dir>; flip the few sided styles. */
+[dir="rtl"] .sidebar { border-right: none; border-left: 1px solid var(--border); }
+[dir="rtl"] textarea, [dir="rtl"] input[type="text"], [dir="rtl"] input[type="password"] { text-align: right; }
+[dir="rtl"] input[type="number"] { direction: ltr; text-align: right; }
+[dir="rtl"] .form-actions { text-align: right; }
 
 @media (max-width: 780px) {
   .layout { grid-template-columns: 1fr; }

@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}{{ _("web.dash.title") }}{% endblock %}
 {% block content %}
 <header class="page-head">
-  <h1>Dashboard</h1>
-  <p class="muted">The platform is booted. Configure your business from <a href="/settings">Settings</a>.</p>
+  <h1>{{ _("web.dash.title") }}</h1>
+  <p class="muted">{{ _("web.dash.subtitle") }}</p>
 </header>
 
 <section class="cards">
   <div class="stat">
     <div class="stat-num">{{ total }}</div>
-    <div class="stat-label">Settings</div>
+    <div class="stat-label">{{ _("web.dash.settings_label") }}</div>
   </div>
   {% for cat in categories %}
   <a class="stat link" href="/settings#{{ cat.category }}">
@@ -20,15 +20,12 @@
 </section>
 
 <section class="note">
-  <h2>What the installer set up</h2>
+  <h2>{{ _("web.dash.note_title") }}</h2>
   <ul>
-    <li>Owner admin (your Telegram ID) with web-panel access.</li>
-    <li>All secrets generated automatically.</li>
-    <li>Empty business-settings records ready to be configured here.</li>
+    <li>{{ _("web.dash.note_item1") }}</li>
+    <li>{{ _("web.dash.note_item2") }}</li>
+    <li>{{ _("web.dash.note_item3") }}</li>
   </ul>
-  <p class="muted">
-    Cards, channels, plans, V2Ray/3X-UI servers, licenses and texts are configured
-    here in the panel — the installer intentionally never asked for them.
-  </p>
+  <p class="muted">{{ _("web.dash.note_footer") }}</p>
 </section>
 {% endblock %}

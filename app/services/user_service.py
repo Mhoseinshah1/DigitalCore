@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.i18n import SUPPORTED
 from app.models.user import User
 
 
@@ -55,6 +56,18 @@ async def touch_activity(session: AsyncSession, telegram_id: int) -> None:
         .values(last_activity_at=_now())
     )
     await session.commit()
+
+
+async def set_language(session: AsyncSession, telegram_id: int, language: str) -> User | None:
+    """Persist the user's UI language. Raises ValueError for unsupported codes."""
+    if language not in SUPPORTED:
+        raise ValueError(f"unsupported language: {language!r}")
+    user = await get_by_telegram_id(session, telegram_id)
+    if user is None:
+        return None
+    user.language = language
+    await session.commit()
+    return user
 
 
 async def set_blocked(session: AsyncSession, telegram_id: int, blocked: bool) -> User | None:

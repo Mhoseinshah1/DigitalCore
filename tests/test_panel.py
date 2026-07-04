@@ -20,14 +20,23 @@ ADMIN_PASSWORD = "panel-pw-123"
 # Anonymous reachability (no database needed)
 # ---------------------------------------------------------------------------
 
-async def test_login_page_renders(client) -> None:
+async def test_login_page_renders_fa_rtl_by_default(client) -> None:
     r = await client.get("/login")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
+    # Default language is fa, rendered right-to-left.
+    assert 'dir="rtl"' in r.text and 'lang="fa"' in r.text
+    assert "ورود" in r.text  # Sign in (fa)
+    assert "نام کاربری" in r.text  # Username (fa)
+    assert 'name="username"' in r.text  # field names stay English
+
+
+async def test_login_page_renders_en_ltr_with_cookie(client) -> None:
+    r = await client.get("/login", cookies={"dc_lang": "en"})
+    assert r.status_code == 200
+    assert 'dir="ltr"' in r.text and 'lang="en"' in r.text
     assert "Sign in" in r.text
-    # The login form asks for the admin username (username scheme).
     assert "Username" in r.text
-    assert 'name="username"' in r.text
 
 
 async def test_static_css_served(client) -> None:
@@ -109,11 +118,18 @@ async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_clien
     assert "dc_session=" in set_cookie
     assert "httponly" in set_cookie.lower()
 
+    panel_client.cookies.set("dc_lang", "en")
     r = await panel_client.get("/")
     assert r.status_code == 200
     assert "Dashboard" in r.text
     # The sidebar identity shows the admin's username.
     assert ADMIN_USERNAME in r.text
+
+    # And the same page renders in Persian when the language cookie says fa.
+    panel_client.cookies.set("dc_lang", "fa")
+    r = await panel_client.get("/")
+    assert r.status_code == 200
+    assert "داشبورد" in r.text and 'dir="rtl"' in r.text
 
 
 async def test_form_login_by_email_identifier_also_works(panel_client) -> None:
@@ -126,6 +142,7 @@ async def test_form_login_by_email_identifier_also_works(panel_client) -> None:
 
 
 async def test_form_login_wrong_password_rejected(panel_client) -> None:
+    panel_client.cookies.set("dc_lang", "en")
     r = await panel_client.post(
         "/login", data={"username": ADMIN_USERNAME, "password": "wrong"}
     )

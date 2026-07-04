@@ -1,8 +1,8 @@
-"""Server-rendered HTML pages for the admin panel.
+"""Server-rendered HTML pages for the admin panel (bilingual fa/en).
 
 The panel is server-rendered so the whole stack works with no separate frontend
-build — keeping the one-command install genuinely one command. The Settings page
-posts a plain form; the JSON API under /api is available for automation.
+build. The viewer's language comes from the dc_lang cookie (default fa) and is
+exposed to templates as `lang`, `rtl`, and the `_` translator callable.
 """
 from __future__ import annotations
 
@@ -15,40 +15,72 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
-from app.core.defaults import CATEGORIES, DEFAULTS, DEFAULTS_BY_KEY
+from app.core.defaults import (
+    CATEGORIES,
+    DEFAULTS,
+    DEFAULTS_BY_KEY,
+    category_title_for,
+    description_for,
+    label_for,
+)
 from app.core.permissions import has_permission
 from app.core.security import create_access_token
 from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
+from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
 from app.web.api.auth import authenticate_admin
 from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
-
-FORBIDDEN_HTML = (
-    "<h1>403 — Not allowed</h1>"
-    "<p>Your role does not include the manage_settings permission.</p>"
-)
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 router = APIRouter(include_in_schema=False)
 
+LANG_COOKIE = "dc_lang"
+
 NAV = [
-    {"href": "/", "label": "Dashboard", "icon": "🏠"},
-    {"href": "/settings", "label": "Settings", "icon": "⚙️"},
+    {"href": "/", "label_key": "web.nav.dashboard", "icon": "🏠"},
+    {"href": "/settings", "label_key": "web.nav.settings", "icon": "⚙️"},
 ]
 
 
-def _ctx(request: Request, admin: Admin | None, **extra) -> dict:
+def _resolve_lang(request: Request) -> str:
+    return normalize_lang(request.cookies.get(LANG_COOKIE))
+
+
+def _ctx(request: Request, admin: Admin | None, **extra: object) -> dict:
+    lang = _resolve_lang(request)
     return {
         "request": request,
         "admin": admin,
         "nav": NAV,
         "version": __version__,
         "domain": request.url.hostname,
+        "lang": lang,
+        "rtl": is_rtl(lang),
+        "_": lambda key, **params: t(key, lang, **params),
         **extra,
     }
+
+
+def _forbidden(lang: str) -> HTMLResponse:
+    body = (
+        f"<h1>{t('web.forbidden_title', lang)}</h1>"
+        f"<p>{t('web.forbidden_body', lang)}</p>"
+    )
+    return HTMLResponse(body, status_code=403)
+
+
+@router.get("/lang/{code}")
+async def switch_language(code: str, request: Request):
+    """Set the panel language cookie and bounce back to the referring page."""
+    lang = normalize_lang(code) if code in SUPPORTED else None
+    target = request.headers.get("referer") or "/"
+    resp = RedirectResponse(target, status_code=302)
+    if lang:
+        resp.set_cookie(LANG_COOKIE, lang, max_age=365 * 24 * 3600, samesite="lax")
+    return resp
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -68,9 +100,10 @@ async def login_submit(
     # The identifier may be the username or the optional email.
     admin = await authenticate_admin(session, username, password)
     if admin is None:
+        lang = _resolve_lang(request)
         return templates.TemplateResponse(
             "login.html",
-            _ctx(request, None, error="Invalid username or password."),
+            _ctx(request, None, error=t("web.invalid_credentials", lang)),
             status_code=401,
         )
     token = create_access_token(admin.id, username=admin.username, email=admin.email)
@@ -94,6 +127,7 @@ async def dashboard(
 ):
     if admin is None:
         return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
     svc = SettingsService(session)
     rows = await svc.all_rows()
     counts: dict[str, int] = {}
@@ -102,7 +136,12 @@ async def dashboard(
         category = meta.category if meta else "general"
         counts[category] = counts.get(category, 0) + 1
     cats = [
-        {**meta, "category": cat, "count": counts.get(cat, 0)}
+        {
+            **meta,
+            "title": category_title_for(cat, lang),
+            "category": cat,
+            "count": counts.get(cat, 0),
+        }
         for cat, meta in sorted(CATEGORIES.items(), key=lambda kv: kv[1]["order"])
     ]
     return templates.TemplateResponse(
@@ -120,8 +159,9 @@ async def settings_page(
 ):
     if admin is None:
         return RedirectResponse("/login", status_code=302)
+    lang = _resolve_lang(request)
     if not has_permission(admin.role, "manage_settings"):
-        return HTMLResponse(FORBIDDEN_HTML, status_code=403)
+        return _forbidden(lang)
     svc = SettingsService(session)
     rows = {r.key: r for r in await svc.all_rows()}
 
@@ -141,8 +181,8 @@ async def settings_page(
             items.append(
                 {
                     "key": d.key,
-                    "label": d.label or d.key,
-                    "description": d.description,
+                    "label": label_for(d, lang),
+                    "description": description_for(d, lang),
                     "value_type": d.value_type,
                     "is_secret": d.is_secret,
                     "value": value,
@@ -150,7 +190,9 @@ async def settings_page(
                 }
             )
         if items:
-            sections.append({**meta, "category": cat, "items": items})
+            sections.append(
+                {**meta, "title": category_title_for(cat, lang), "category": cat, "items": items}
+            )
 
     return templates.TemplateResponse(
         "settings.html",
@@ -167,7 +209,7 @@ async def settings_submit(
     if admin is None:
         return RedirectResponse("/login", status_code=302)
     if not has_permission(admin.role, "manage_settings"):
-        return HTMLResponse(FORBIDDEN_HTML, status_code=403)
+        return _forbidden(_resolve_lang(request))
 
     form = await request.form()
     values: dict[str, object] = {}
