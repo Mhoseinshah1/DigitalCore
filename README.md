@@ -33,11 +33,20 @@ tutorials, or any other business setting. All of those are configured later from
 
 ## Install
 
+`main` is the production branch. Clone the repository and run the one-command
+installer:
+
 ```bash
-git clone <this-repo> digitalcore
+git clone https://github.com/Mhoseinshah1/DigitalCore.git digitalcore
 cd digitalcore
-./install.sh
+sudo bash scripts/install.sh
 ```
+
+`scripts/install.sh` simply forwards to the root `./install.sh` — either works.
+
+> The installer builds the stack from this repository (Docker Compose), so it
+> must be run from a full clone. A standalone `curl … | bash` one-liner is not
+> used, because there is nothing to build without the repository present.
 
 The installer will:
 
