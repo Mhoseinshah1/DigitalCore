@@ -54,16 +54,15 @@ async def login_page(request: Request, admin: Admin | None = Depends(get_current
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(
     request: Request,
-    username: str = Form(...),
+    email: str = Form(...),
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ):
-    # The form field is historically named "username"; the value is the admin email.
-    admin = await authenticate_admin(session, username, password)
+    admin = await authenticate_admin(session, email, password)
     if admin is None:
         return templates.TemplateResponse(
             "login.html",
-            _ctx(request, None, error="Invalid username or password."),
+            _ctx(request, None, error="Invalid email or password."),
             status_code=401,
         )
     token = create_access_token(admin.id, email=admin.email)

@@ -24,6 +24,10 @@ async def test_login_page_renders(client) -> None:
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "Sign in" in r.text
+    # The login form asks for the admin email (email scheme, not username/telegram).
+    assert "Email" in r.text
+    assert 'type="email"' in r.text
+    assert 'name="email"' in r.text
 
 
 async def test_static_css_served(client) -> None:
@@ -87,7 +91,7 @@ async def panel_client() -> httpx.AsyncClient:
 async def _login(client: httpx.AsyncClient) -> None:
     r = await client.post(
         "/login",
-        data={"username": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+        data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
     assert r.status_code == 302 and r.headers["location"] == "/"
@@ -96,7 +100,7 @@ async def _login(client: httpx.AsyncClient) -> None:
 async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_client) -> None:
     r = await panel_client.post(
         "/login",
-        data={"username": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+        data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
     assert r.status_code == 302
@@ -107,11 +111,13 @@ async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_clien
     r = await panel_client.get("/")
     assert r.status_code == 200
     assert "Dashboard" in r.text
+    # The sidebar identity shows the admin's email (email scheme).
+    assert ADMIN_EMAIL in r.text
 
 
 async def test_form_login_wrong_password_rejected(panel_client) -> None:
     r = await panel_client.post(
-        "/login", data={"username": ADMIN_EMAIL, "password": "wrong"}
+        "/login", data={"email": ADMIN_EMAIL, "password": "wrong"}
     )
     assert r.status_code == 401
     assert "Invalid" in r.text
