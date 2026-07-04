@@ -4,12 +4,12 @@ This is the single source of truth for every business setting the platform
 understands. On first boot the seeder inserts one row per entry with an
 empty/default value; the admin panel edits them afterwards.
 
-The keys the installer policy explicitly requires to exist as default records
-are all present here:
+The keys the installer/settings policy explicitly requires to exist as default
+records are all present here:
 
-    log_group_id, force_join_channel, default_card_number, default_card_owner,
-    default_sheba, payment_text, start_text, rules_text, support_text,
-    maintenance_mode
+    card_number, sheba, card_owner, payment_text, log_group_id,
+    force_join_channel, start_text, rules_text, support_text,
+    sales_enabled, wallet_enabled, maintenance_mode
 
 Categories map 1:1 to the sections of the panel Settings page. `env_var` lets an
 operator pre-seed an initial value from the environment for a handful of optional
@@ -45,13 +45,13 @@ CATEGORIES: dict[str, dict[str, object]] = {
 
 DEFAULTS: list[SettingDef] = [
     # ---------------- Payment ----------------
-    SettingDef("default_card_number", "payment", "string",
+    SettingDef("card_number", "payment", "string",
                label="Card number", env_var="DEFAULT_CARD_NUMBER",
                description="Destination card number for card-to-card payments."),
-    SettingDef("default_sheba", "payment", "string",
+    SettingDef("sheba", "payment", "string",
                label="SHEBA / IBAN", env_var="DEFAULT_SHEBA",
                description="Destination SHEBA (IBAN) number."),
-    SettingDef("default_card_owner", "payment", "string",
+    SettingDef("card_owner", "payment", "string",
                label="Card owner name", env_var="DEFAULT_CARD_OWNER",
                description="Full name of the card/account owner."),
     SettingDef("payment_text", "payment", "text",

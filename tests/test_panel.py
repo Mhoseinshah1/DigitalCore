@@ -145,7 +145,7 @@ async def test_api_settings_fresh_install_shows_catalog_defaults(panel_client) -
     # Catalog defaults are visible even though no row has been saved yet.
     assert values["sales_enabled"] is True
     assert values["low_stock_threshold"] == 5
-    assert values["default_card_number"] == ""
+    assert values["card_number"] == ""
 
 
 async def test_settings_form_roundtrip_and_typed_api(panel_client) -> None:
@@ -154,7 +154,7 @@ async def test_settings_form_roundtrip_and_typed_api(panel_client) -> None:
     # Save via the HTML form; unchecked checkboxes mean False.
     r = await panel_client.post(
         "/settings",
-        data={"default_card_number": "6037-1234", "min_wallet_topup": "5000"},
+        data={"card_number": "6037-1234", "min_wallet_topup": "5000"},
         follow_redirects=False,
     )
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
@@ -168,7 +168,7 @@ async def test_settings_form_roundtrip_and_typed_api(panel_client) -> None:
         for cat in r.json()["categories"]
         for item in cat["items"]
     }
-    assert values["default_card_number"] == "6037-1234"
+    assert values["card_number"] == "6037-1234"
     assert values["min_wallet_topup"] == 5000
     assert values["wallet_enabled"] is False  # checkbox omitted from the form
 

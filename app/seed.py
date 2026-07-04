@@ -41,7 +41,8 @@ async def seed_default_settings(session) -> int:
             if env_value != "":
                 initial = env_value
         # SettingsService handles type coercion and encrypts secret values.
-        await svc.set(d.key, initial)
+        # Initial defaults are not audited — only real changes are.
+        await svc.set(d.key, initial, audit=False)
         created += 1
 
     if created:

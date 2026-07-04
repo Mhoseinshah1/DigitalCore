@@ -4,6 +4,8 @@ from __future__ import annotations
 from aiogram import Bot, Dispatcher
 
 from app.bot.handlers.admin import menu as admin_menu
+from app.bot.handlers.admin import settings as admin_settings
+from app.bot.handlers.user import rules as user_rules
 from app.bot.handlers.user import start as user_start
 from app.bot.middlewares.activity import ActivityMiddleware
 from app.bot.middlewares.admin import AdminMiddleware
@@ -26,5 +28,7 @@ def create_dispatcher() -> Dispatcher:
         observer.middleware(ForceJoinMiddleware())
 
     dp.include_router(admin_menu.router)
+    dp.include_router(admin_settings.router)
     dp.include_router(user_start.router)
+    dp.include_router(user_rules.router)
     return dp

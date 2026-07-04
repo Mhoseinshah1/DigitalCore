@@ -7,6 +7,7 @@ posts a plain form; the JSON API under /api is available for automation.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -15,12 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.core.defaults import CATEGORIES, DEFAULTS, DEFAULTS_BY_KEY
+from app.core.permissions import has_permission
 from app.core.security import create_access_token
 from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
 from app.models.admin import Admin
 from app.web.api.auth import authenticate_admin
 from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
+
+FORBIDDEN_HTML = (
+    "<h1>403 — Not allowed</h1>"
+    "<p>Your role does not include the manage_settings permission.</p>"
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -109,9 +116,12 @@ async def settings_page(
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
     saved: int = 0,
+    error: str = "",
 ):
     if admin is None:
         return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_settings"):
+        return HTMLResponse(FORBIDDEN_HTML, status_code=403)
     svc = SettingsService(session)
     rows = {r.key: r for r in await svc.all_rows()}
 
@@ -143,7 +153,8 @@ async def settings_page(
             sections.append({**meta, "category": cat, "items": items})
 
     return templates.TemplateResponse(
-        "settings.html", _ctx(request, admin, sections=sections, saved=bool(saved))
+        "settings.html",
+        _ctx(request, admin, sections=sections, saved=bool(saved), error=error),
     )
 
 
@@ -155,6 +166,8 @@ async def settings_submit(
 ):
     if admin is None:
         return RedirectResponse("/login", status_code=302)
+    if not has_permission(admin.role, "manage_settings"):
+        return HTMLResponse(FORBIDDEN_HTML, status_code=403)
 
     form = await request.form()
     values: dict[str, object] = {}
@@ -170,5 +183,8 @@ async def settings_submit(
             values[d.key] = submitted
 
     svc = SettingsService(session)
-    await svc.update_many(values)
+    try:
+        await svc.update_many(values, actor_type="admin", actor_id=admin.id)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/settings?saved=1", status_code=303)

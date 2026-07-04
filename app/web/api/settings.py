@@ -14,12 +14,21 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.defaults import CATEGORIES, DEFAULTS, DEFAULTS_BY_KEY
+from app.core.permissions import has_permission
 from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
 from app.models.admin import Admin
 from app.web.deps import get_current_admin
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _require_manage_settings(admin: Admin) -> None:
+    if not has_permission(admin.role, "manage_settings"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Your role does not include the manage_settings permission",
+        )
 
 
 class UpdateRequest(BaseModel):
@@ -31,6 +40,7 @@ async def list_settings(
     admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
+    _require_manage_settings(admin)
     svc = SettingsService(session)
     rows = {r.key: r for r in await svc.all_rows()}
 
@@ -89,11 +99,15 @@ async def update_settings(
     admin: Admin = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
+    _require_manage_settings(admin)
     unknown = [k for k in body.values if k not in DEFAULTS_BY_KEY]
     if unknown:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Unknown setting keys: {', '.join(unknown)}"
         )
     svc = SettingsService(session)
-    await svc.update_many(body.values)
+    try:
+        await svc.update_many(body.values, actor_type="admin", actor_id=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     return {"ok": True, "updated": [k for k in body.values]}

@@ -2,8 +2,14 @@
 
 The settings table stores only (key, value, is_secret); display/type metadata
 (category, value_type, label, description) lives in the code catalog at
-app/core/defaults.py and is looked up by key. Secret-flagged values are stored
-encrypted at rest (see app/core/crypto.py).
+app/core/defaults.py and is looked up by key.
+
+Guarantees provided by this service:
+- typed reads (get_str / get_bool / get_int) that decrypt secrets;
+- set() validates the value against the catalog value_type (raising ValueError
+  on bad input), encrypts secret values at rest via app/core/crypto.py, and
+  writes an audit_logs row for every actual change — with secret values
+  redacted ("***") so plaintext secrets never reach the audit trail or logs.
 """
 from __future__ import annotations
 
@@ -17,6 +23,10 @@ from app.core.defaults import DEFAULTS_BY_KEY, SettingDef
 from app.models.setting import Setting
 
 _TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off", ""}
+
+SECRET_REDACTED = "***"
+SECRET_MASK = "********"
 
 
 def coerce_out(value_type: str, raw: str) -> Any:
@@ -43,6 +53,23 @@ def coerce_in(value_type: str, value: Any) -> str:
         except (TypeError, ValueError):
             return "0"
     return "" if value is None else str(value)
+
+
+def validate_value(value_type: str, value: Any) -> None:
+    """Raise ValueError when `value` cannot be stored as `value_type`."""
+    if value_type == "bool":
+        if isinstance(value, bool):
+            return
+        if str(value).strip().lower() in (_TRUE | _FALSE):
+            return
+        raise ValueError(f"expected a boolean (true/false), got {value!r}")
+    if value_type == "int":
+        if isinstance(value, bool):
+            raise ValueError(f"expected an integer, got a boolean {value!r}")
+        try:
+            int(str(value).strip())
+        except (TypeError, ValueError):
+            raise ValueError(f"expected an integer, got {value!r}") from None
 
 
 def meta_for(key: str) -> SettingDef | None:
@@ -72,6 +99,23 @@ class SettingsService:
         stored = crypto.decrypt(row.value) if row.is_secret else row.value
         return coerce_out(value_type_for(key), stored)
 
+    async def get_str(self, key: str, default: str = "") -> str:
+        value = await self.get(key, default)
+        return default if value is None else str(value)
+
+    async def get_bool(self, key: str, default: bool = False) -> bool:
+        value = await self.get(key, default)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in _TRUE
+
+    async def get_int(self, key: str, default: int = 0) -> int:
+        value = await self.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     async def all_rows(self) -> list[Setting]:
         result = await self.session.execute(select(Setting))
         return list(result.scalars().all())
@@ -81,33 +125,84 @@ class SettingsService:
         out: dict[str, Any] = {}
         for row in await self.all_rows():
             if row.is_secret and not reveal_secrets:
-                out[row.key] = "" if not row.value else "********"
+                out[row.key] = "" if not row.value else SECRET_MASK
                 continue
             stored = crypto.decrypt(row.value) if row.is_secret else row.value
             out[row.key] = coerce_out(value_type_for(row.key), stored)
         return out
 
-    async def set(self, key: str, value: Any) -> Setting:
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        actor_type: str = "system",
+        actor_id: int | None = None,
+        audit: bool = True,
+    ) -> Setting:
+        """Validate, store (encrypting secrets), and audit-log a setting change.
+
+        Raises ValueError when the value does not match the catalog value_type.
+        """
         meta = meta_for(key)
+        value_type = meta.value_type if meta else "string"
+        is_secret = meta.is_secret if meta else False
+
+        validate_value(value_type, value)
+
         row = await self.get_raw(key)
         if row is None:
-            row = Setting(
-                key=key,
-                value="",
-                is_secret=meta.is_secret if meta else False,
-            )
+            row = Setting(key=key, value="", is_secret=is_secret)
             self.session.add(row)
 
         # A masked secret means "unchanged" — never overwrite with the mask.
-        if row.is_secret and isinstance(value, str) and value == "********":
+        if row.is_secret and isinstance(value, str) and value == SECRET_MASK:
             return row
 
-        stored = coerce_in(meta.value_type if meta else "string", value)
-        row.value = crypto.encrypt(stored) if row.is_secret else stored
+        old_stored = crypto.decrypt(row.value) if row.is_secret else row.value
+        new_stored = coerce_in(value_type, value)
+
+        if old_stored == new_stored:
+            # No change: nothing to write, nothing to audit.
+            await self.session.commit()
+            return row
+
+        row.value = crypto.encrypt(new_stored) if row.is_secret else new_stored
+
+        if audit:
+            # Import here to avoid a service <-> core import cycle at module load.
+            from app.services import audit_service
+
+            redact = row.is_secret
+            await audit_service.log(
+                self.session,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action="setting.changed",
+                target_type="setting",
+                target_id=key,
+                old=SECRET_REDACTED if redact else old_stored,
+                new=SECRET_REDACTED if redact else new_stored,
+            )
+        else:
+            await self.session.commit()
         return row
 
-    async def update_many(self, values: dict[str, Any]) -> None:
-        for key, value in values.items():
-            if key in DEFAULTS_BY_KEY:
-                await self.set(key, value)
+    async def update_many(
+        self,
+        values: dict[str, Any],
+        *,
+        actor_type: str = "system",
+        actor_id: int | None = None,
+    ) -> None:
+        """Set every known key in `values`.
+
+        All values are validated up front so a single bad value rejects the
+        whole batch (ValueError) without partially applying it.
+        """
+        known = {k: v for k, v in values.items() if k in DEFAULTS_BY_KEY}
+        for key, value in known.items():
+            validate_value(value_type_for(key), value)
+        for key, value in known.items():
+            await self.set(key, value, actor_type=actor_type, actor_id=actor_id)
         await self.session.commit()
