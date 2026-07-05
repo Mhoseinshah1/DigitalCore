@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from app.bot.handlers.admin import menu as admin_menu
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import products as admin_products
+from app.bot.handlers.admin import receipt_actions as admin_receipt_actions
 from app.bot.handlers.admin import settings as admin_settings
 from app.bot.handlers.admin import xui as admin_xui
 from app.bot.handlers.user import language as user_language
@@ -19,6 +20,7 @@ from app.bot.middlewares.blocked import BlockedMiddleware
 from app.bot.middlewares.forcejoin import ForceJoinMiddleware
 from app.bot.middlewares.language import LanguageMiddleware
 from app.bot.middlewares.maintenance import MaintenanceMiddleware
+from app.bot.middlewares.restricted import RestrictedMiddleware
 
 
 def create_bot(token: str) -> Bot:
@@ -29,12 +31,13 @@ def create_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
     # Execution order per event: activity -> admin (role) -> language (lang + _)
-    # -> blocked (block non-admin blocked users) -> maintenance -> forcejoin.
+    # -> blocked -> restricted (gate purchase actions) -> maintenance -> forcejoin.
     for observer in (dp.message, dp.callback_query):
         observer.middleware(ActivityMiddleware())
         observer.middleware(AdminMiddleware())
         observer.middleware(LanguageMiddleware())
         observer.middleware(BlockedMiddleware())
+        observer.middleware(RestrictedMiddleware())
         observer.middleware(MaintenanceMiddleware())
         observer.middleware(ForceJoinMiddleware())
 
@@ -43,6 +46,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_settings.router)
     dp.include_router(admin_products.router)
     dp.include_router(admin_xui.router)
+    dp.include_router(admin_receipt_actions.router)
     dp.include_router(user_language.router)
     dp.include_router(user_start.router)
     dp.include_router(user_rules.router)

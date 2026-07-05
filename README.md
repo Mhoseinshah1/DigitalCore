@@ -78,6 +78,57 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   approval/rejection, license delivery, V2Ray client creation, subscription/QR
   links, wallet payments, coupons/referrals/tickets/reports/gateway — those are
   Phase 4+.
+- **Phase 4 — done.** **Approval / delivery + receipt-review admin quick actions.**
+  An admin reviewing a submitted receipt — in the web panel **or** in Telegram —
+  can **approve** (which delivers: a license code is popped from the product's key
+  pool, or a V2Ray client is provisioned on the bound server/inbound) or **reject
+  with a reason**, and can run user-management actions in the same place: **add /
+  subtract wallet balance**, **block**, **restrict** (softer than a block), and
+  **view user**. Restricted users can still `/start` and read rules/support but
+  cannot order, buy, or submit receipts. **Not** in this phase: subscription/QR
+  link generation, wallet *purchase*/top-up, gateways, coupons/referrals/tickets.
+
+### Phase 4 — approval, delivery & receipt-review quick actions
+
+**Approve / reject** (`app/services/payment_service.py`): a submitted receipt
+(order `waiting_admin`, payment `receipt_submitted`) can be approved or rejected
+**once** — the state guard blocks duplicates. Approval sets the order/payment to
+`approved` (+`paid_at`/`approved_at`/`admin_id`) then triggers delivery; rejection
+sets `rejected` with the required reason.
+
+**Delivery** (`app/services/delivery_service.py`, best-effort, never un-approves):
+- *license* → pops the next code from the product's **key pool**
+  (`app/services/license_service.py`, `license_keys` table) into
+  `order.delivered_payload` and marks the order `delivered`. Empty pool → the
+  order stays `approved` and the admin is told to stock keys.
+- *v2ray* → provisions a client on the bound 3X-UI server/inbound via
+  `xui_service.add_client`; on failure the order stays `approved`.
+
+**Receipt-review quick actions** — permission-gated, from `/admin/orders/{id}`,
+the pending-receipts list, and (mirrored) `/admin/users/{id}`:
+
+| Action | Web route | Telegram button | Permission |
+|--------|-----------|-----------------|------------|
+| Approve / Reject | `POST …/{id}/{approve,reject}` | ✅ / ❌ | `process_payments` |
+| Add / Subtract balance | `POST …/{id}/{add,subtract}-balance` | 💰 / ➖ (FSM: amount → reason) | `adjust_wallet` |
+| Block user | `POST …/{id}/block-user` | 🚫 (confirm) | `block_users` |
+| Restrict / Unrestrict | `POST …/{id}/{restrict,unrestrict}-user` | ⚠️ (FSM: reason) | `restrict_users` |
+| View user | link to `/admin/users/{id}` | 👤 | `view_users` |
+
+Wallet moves go through `app/services/wallet_service.py` (records
+`balance_before`/`balance_after`/`type`/`admin_id`/`reason`; refuses to go
+negative unless `allow_negative_wallet` is on; reason required). The Telegram FSM
+carries `order_id`/`user_id`/`admin_id`/`action`, only the **initiating admin**
+can complete it, `/cancel` (or the لغو button) aborts, and non-admin callbacks are
+refused. Restriction is enforced by `RestrictedMiddleware`.
+
+**Roles** (`app/core/permissions.py`): owner → all; admin → approve/reject +
+wallet + block + restrict; accountant → approve/reject + wallet (no block/restrict);
+support → block + restrict (no approve, no wallet); viewer → read-only. Audited
+actions: `payment_approved`, `payment_rejected`, `order_delivered`,
+`admin_wallet_added_from_receipt_review`,
+`admin_wallet_subtracted_from_receipt_review`, `user_blocked_from_receipt_review`,
+`user_restricted_from_receipt_review`, `user_unrestricted` (no secrets in metadata).
 
 ### Phase 3 — orders & card-to-card receipts
 
@@ -361,8 +412,10 @@ reconciliation); Phase 2.1 adds migration **0009**
 (`xui_servers.is_active/last_error`, nullable `username`/`encrypted_password`,
 `xui_inbounds.network/security`, and the `products.xui_server_id/xui_inbound_id`
 FK bindings); Phase 3 adds migration **0010** (the `orders` and `payments`
-tables). All run cleanly on a fresh **and** an existing database and preserve
-operator-entered values.
+tables); Phase 4 adds migration **0011** (`users.is_restricted/restriction_reason/
+restricted_until`, `wallet_transactions.balance_before/type`,
+`orders.delivered_payload`, and the `license_keys` pool table). All run cleanly on
+a fresh **and** an existing database and preserve operator-entered values.
 
 Run `python -m app.seed` once after migrating to insert the default settings
 rows (idempotent; never overwrites custom values).
@@ -382,8 +435,27 @@ rows (idempotent; never overwrites custom values).
 7. Open the receipt via `/admin/receipts/{id}` — it must only load while logged
    in as an admin.
 8. In the bot, `/orders` (My Orders) shows the order with its Persian status.
-9. Confirm **nothing is delivered** yet (no license shown, no V2Ray client) —
-   approval/rejection and delivery arrive in **Phase 4**.
+9. Confirm the order is `waiting_admin` (Phase 4 approves/delivers it).
+
+## Phase 4 manual test checklist
+
+1. Stock license keys for a license product (via `license_service.add_keys`).
+2. As a user, order the product and submit a receipt (Phase 3 flow).
+3. In **Orders → Pending receipts** (or the Telegram notification), open the receipt.
+4. Click **Add balance**, enter an amount + reason → the user's wallet increases,
+   a wallet transaction appears, and an audit row is written.
+5. Click **Block user** → the user can no longer use the bot; **unblock** from the
+   user detail page.
+6. Click **Restrict user** with a reason → the user can `/start` but cannot create
+   a new order or submit a receipt; **unrestrict** to reverse it.
+7. Click **Approve** → the order becomes `delivered` and the license code shows in
+   the order detail (`delivered_payload`). For a V2Ray product a client is
+   provisioned on the bound server/inbound.
+8. Reject a different receipt with a reason; confirm duplicate approve/reject is
+   blocked.
+9. Repeat the same actions from the **Telegram** notification buttons (approve,
+   reject, add/subtract balance, block, restrict, view user) — confirm only the
+   admin who started an FSM action can finish it, and `/cancel` aborts.
 
 ## Environment
 

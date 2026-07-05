@@ -69,6 +69,10 @@ class Order(Base, TimestampMixin):
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # What was delivered after approval: a license code, or v2ray credentials /
+    # subscription reference. Filled by delivery_service; never a secret token.
+    delivered_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Lifecycle timestamps (created_at/updated_at come from TimestampMixin).
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

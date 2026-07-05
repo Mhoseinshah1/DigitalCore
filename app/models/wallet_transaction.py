@@ -27,10 +27,20 @@ class WalletTransaction(Base):
 
     # Signed integer toman: + credit, - debit.
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    balance_before: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
     balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    # e.g. "admin_adjustment" (the only kind in Phase 4).
+    type: Mapped[str] = mapped_column(
+        String(32), default="admin_adjustment", server_default="admin_adjustment",
+        nullable=False,
+    )
 
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # `actor_id` is the acting admin's id for admin adjustments.
     actor_type: Mapped[str] = mapped_column(String(16), default="admin", nullable=False)
     actor_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 

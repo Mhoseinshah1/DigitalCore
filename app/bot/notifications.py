@@ -9,16 +9,14 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.bot.handlers.admin.receipt_actions import receipt_action_keyboard
 from app.config import settings
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
 from app.i18n import t
 
 log = logging.getLogger("bot.notify")
-
-CB_NEXT_PHASE = "receipt_next_phase"  # placeholder button (approve/reject in P4)
 
 
 async def _recipients() -> list[int | str]:
@@ -70,10 +68,7 @@ async def notify_receipt_submitted(
 ) -> None:
     """Post the new-receipt notice (with the receipt file when possible)."""
     text = _build_text(order, payment, product, user, lang)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t("notify.receipt.next_phase", lang),
-                              callback_data=CB_NEXT_PHASE)],
-    ])
+    keyboard = receipt_action_keyboard(order.id, lambda k, **p: t(k, lang, **p))
     file_id = payment.receipt_file_id
     mime = (payment.receipt_mime_type or "").lower()
     for chat_id in await _recipients():

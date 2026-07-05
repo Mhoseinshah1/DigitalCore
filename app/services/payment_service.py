@@ -232,3 +232,78 @@ async def submit_receipt(
     )
     await session.refresh(payment)
     return payment
+
+
+# --------------------------------------------------------------------------
+# Approve / reject (Phase 4). A submitted receipt (order waiting_admin, payment
+# receipt_submitted) can be approved once or rejected once — the state guard
+# blocks duplicates.
+# --------------------------------------------------------------------------
+def _ensure_reviewable(order, payment) -> None:
+    if order is None:
+        raise ReceiptError("order not found", code="order_not_found")
+    if payment is None or order.status != "waiting_admin" or payment.status != "receipt_submitted":
+        raise ReceiptError("order is not awaiting review", code="not_reviewable")
+
+
+async def approve_payment(
+    session: AsyncSession, order_id: int, *, admin_id: int | None, deliver: bool = True
+) -> dict:
+    """Approve a submitted receipt and (optionally) attempt delivery."""
+    order = await order_service.get_order(session, order_id)
+    payment = await get_payment_by_order(session, order_id)
+    _ensure_reviewable(order, payment)
+
+    now = _now()
+    prev = order.status
+    payment.status = "approved"
+    payment.approved_at = now
+    payment.admin_id = admin_id
+    order.status = "approved"
+    order.paid_at = now
+    order.approved_at = now
+    order.admin_id = admin_id
+
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin_id, action="payment_approved",
+        target_type="order", target_id=order.id,
+        old=prev, new="approved",
+        meta=f"order={order.order_number} payment_id={payment.id}",
+    )
+
+    delivery = {"delivered": False, "reason": "skipped"}
+    if deliver:
+        from app.services import delivery_service
+        delivery = await delivery_service.deliver_order(session, order, actor_id=admin_id)
+    await session.refresh(order)
+    return {"order": order, "payment": payment, "delivery": delivery}
+
+
+async def reject_payment(
+    session: AsyncSession, order_id: int, *, admin_id: int | None, reason: str
+) -> dict:
+    """Reject a submitted receipt with a required reason."""
+    if not (reason or "").strip():
+        raise ReceiptError("a reason is required", code="reason_required")
+    order = await order_service.get_order(session, order_id)
+    payment = await get_payment_by_order(session, order_id)
+    _ensure_reviewable(order, payment)
+
+    now = _now()
+    prev = order.status
+    payment.status = "rejected"
+    payment.rejected_at = now
+    payment.admin_id = admin_id
+    order.status = "rejected"
+    order.rejected_at = now
+    order.admin_id = admin_id
+    order.reject_reason = reason.strip()
+
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin_id, action="payment_rejected",
+        target_type="order", target_id=order.id,
+        old=prev, new="rejected",
+        meta=f"order={order.order_number} payment_id={payment.id} reason={reason.strip()}",
+    )
+    await session.refresh(order)
+    return {"order": order, "payment": payment}

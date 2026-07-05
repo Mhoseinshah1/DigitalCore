@@ -41,6 +41,7 @@ from app.services import (
     payment_service,
     product_service,
     user_service,
+    wallet_service,
     xui_server_service,
 )
 from app.web.api.auth import authenticate_admin
@@ -480,13 +481,67 @@ async def user_detail_page(
         return RedirectResponse("/admin/users", status_code=302)
     summary = user_service.get_user_summary(user)
     txns = await user_service.list_wallet_transactions(session, user_id=user_id, limit=20)
+    orders = await order_service.list_user_orders(session, user_id, limit=20)
+    order_rows = [_order_row(o, lang) for o in orders]
     return templates.TemplateResponse(
         "user_detail.html",
         _ctx(request, admin, user=user, summary=summary, txns=txns,
+             orders=order_rows,
              can_manage_users=has_permission(admin.role, "manage_users"),
              can_adjust_wallet=has_permission(admin.role, "adjust_wallet"),
+             can_block_users=has_permission(admin.role, "block_users"),
+             can_restrict_users=has_permission(admin.role, "restrict_users"),
              saved=bool(saved), error=error),
     )
+
+
+@router.post("/users/{user_id}/restrict")
+async def user_restrict(
+    user_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "restrict_users")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    if not reason:
+        return RedirectResponse(
+            f"/admin/users/{user_id}?error={quote('a reason is required')}", status_code=303
+        )
+    await user_service.set_restricted(
+        session, user_id, True, reason=reason, actor_id=admin.id,
+        ip_address=_client_ip(request),
+    )
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="user_restricted",
+        target_type="user", target_id=user_id, meta=f"reason={reason}",
+    )
+    await session.commit()
+    return RedirectResponse(f"/admin/users/{user_id}?saved=1", status_code=303)
+
+
+@router.post("/users/{user_id}/unrestrict")
+async def user_unrestrict(
+    user_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "restrict_users")
+    if deny:
+        return deny
+    await user_service.set_restricted(
+        session, user_id, False, actor_id=admin.id, ip_address=_client_ip(request)
+    )
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="user_unrestricted",
+        target_type="user", target_id=user_id,
+    )
+    await session.commit()
+    return RedirectResponse(f"/admin/users/{user_id}?saved=1", status_code=303)
 
 
 @router.post("/users/{user_id}/block")
@@ -1289,11 +1344,21 @@ async def xui_server_inbounds_json(
 
 
 # --------------------------------------------------------------------------
-# Orders + receipts (view_payments) — Phase 3.
+# Orders + receipts (view_payments) — Phase 3/4.
 #
-# View-only queue: list orders, inspect one, and view its receipt. Approval,
-# rejection, and delivery are Phase 4 (only placeholder text here).
+# List orders, inspect one, view its receipt, and (Phase 4) run the receipt-review
+# quick actions: approve/reject, wallet add/subtract, block/restrict the user.
 # --------------------------------------------------------------------------
+def _order_action_perms(role: object) -> dict:
+    return {
+        "can_process": has_permission(role, "process_payments"),
+        "can_adjust_wallet": has_permission(role, "adjust_wallet"),
+        "can_block": has_permission(role, "block_users"),
+        "can_restrict": has_permission(role, "restrict_users"),
+        "can_view_users": has_permission(role, "view_users"),
+    }
+
+
 def _order_row(order, lang: str) -> dict:
     """A flat, template-ready view of an order + its payment."""
     payment = order.payment
@@ -1332,7 +1397,8 @@ async def orders_page(
     rows = [_order_row(o, lang) for o in orders]
     return templates.TemplateResponse(
         "orders.html",
-        _ctx(request, admin, rows=rows, pending_only=False),
+        _ctx(request, admin, rows=rows, pending_only=False,
+             perms=_order_action_perms(admin.role)),
     )
 
 
@@ -1349,7 +1415,8 @@ async def orders_pending_page(
     rows = [_order_row(o, lang) for o in orders]
     return templates.TemplateResponse(
         "orders.html",
-        _ctx(request, admin, rows=rows, pending_only=True),
+        _ctx(request, admin, rows=rows, pending_only=True,
+             perms=_order_action_perms(admin.role)),
     )
 
 
@@ -1359,6 +1426,8 @@ async def order_detail_page(
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
 ):
     lang, deny = _guard(request, admin, "view_payments")
     if deny:
@@ -1372,11 +1441,215 @@ async def order_detail_page(
         if (r.target_type == "order" and str(r.target_id) == str(order.id))
         or (r.target_type == "payment" and order.payment and str(r.target_id) == str(order.payment.id))
     ]
+    wallet_txns = []
+    if order.user:
+        wallet_txns = await user_service.list_wallet_transactions(
+            session, user_id=order.user_id, limit=10
+        )
     return templates.TemplateResponse(
         "order_detail.html",
         _ctx(request, admin, order=order, payment=order.payment, product=order.product,
-             user=order.user, row=_order_row(order, lang), logs=logs),
+             user=order.user, row=_order_row(order, lang), logs=logs,
+             wallet_txns=wallet_txns, perms=_order_action_perms(admin.role),
+             saved=saved, error=error),
     )
+
+
+# --- receipt-review quick actions (Phase 4) ---------------------------------
+def _order_back(order_id: int, *, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/orders/{order_id}?{q}", status_code=303)
+
+
+@router.post("/orders/{order_id}/approve")
+async def order_approve(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "process_payments")
+    if deny:
+        return deny
+    try:
+        result = await payment_service.approve_payment(session, order_id, admin_id=admin.id)
+        await session.commit()
+    except (ValueError, payment_service.ReceiptError) as exc:
+        return _order_back(order_id, error=str(exc))
+    delivered = result.get("delivery", {}).get("delivered")
+    return _order_back(order_id, saved="approved" if delivered else "approved_undelivered")
+
+
+@router.post("/orders/{order_id}/reject")
+async def order_reject(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "process_payments")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    try:
+        await payment_service.reject_payment(session, order_id, admin_id=admin.id, reason=reason)
+        await session.commit()
+    except (ValueError, payment_service.ReceiptError) as exc:
+        return _order_back(order_id, error=str(exc))
+    return _order_back(order_id, saved="rejected")
+
+
+async def _order_user_id(session: AsyncSession, order_id: int) -> tuple[int | None, int | None]:
+    order = await order_service.get_order(session, order_id)
+    return (order.id, order.user_id) if order else (None, None)
+
+
+@router.post("/orders/{order_id}/add-balance")
+async def order_add_balance(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "adjust_wallet")
+    if deny:
+        return deny
+    _oid, user_id = await _order_user_id(session, order_id)
+    if user_id is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    form = dict(await request.form())
+    try:
+        amount = int(str(form.get("amount", "0")).strip() or "0")
+        await wallet_service.add_balance(
+            session, user_id, amount, admin_id=admin.id,
+            reason=str(form.get("reason", "")), ip_address=_client_ip(request),
+        )
+        await audit_service.log(
+            session, actor_type="admin", actor_id=admin.id,
+            action="admin_wallet_added_from_receipt_review", target_type="user",
+            target_id=user_id, new=str(amount),
+            meta=f"order_id={order_id} amount={amount}",
+        )
+        await session.commit()
+    except ValueError as exc:
+        return _order_back(order_id, error=str(exc))
+    return _order_back(order_id, saved="wallet_added")
+
+
+@router.post("/orders/{order_id}/subtract-balance")
+async def order_subtract_balance(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "adjust_wallet")
+    if deny:
+        return deny
+    _oid, user_id = await _order_user_id(session, order_id)
+    if user_id is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    form = dict(await request.form())
+    try:
+        amount = int(str(form.get("amount", "0")).strip() or "0")
+        await wallet_service.subtract_balance(
+            session, user_id, amount, admin_id=admin.id,
+            reason=str(form.get("reason", "")), ip_address=_client_ip(request),
+        )
+        await audit_service.log(
+            session, actor_type="admin", actor_id=admin.id,
+            action="admin_wallet_subtracted_from_receipt_review", target_type="user",
+            target_id=user_id, new=str(amount),
+            meta=f"order_id={order_id} amount={amount}",
+        )
+        await session.commit()
+    except ValueError as exc:
+        return _order_back(order_id, error=str(exc))
+    return _order_back(order_id, saved="wallet_subtracted")
+
+
+@router.post("/orders/{order_id}/block-user")
+async def order_block_user(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "block_users")
+    if deny:
+        return deny
+    _oid, user_id = await _order_user_id(session, order_id)
+    if user_id is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip() or None
+    await user_service.admin_set_blocked(
+        session, user_id, True, actor_id=admin.id, ip_address=_client_ip(request)
+    )
+    if reason:
+        await user_service.update_admin_note(session, user_id, reason, actor_id=admin.id)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id,
+        action="user_blocked_from_receipt_review", target_type="user",
+        target_id=user_id, meta=f"order_id={order_id} reason={reason or ''}",
+    )
+    await session.commit()
+    return _order_back(order_id, saved="user_blocked")
+
+
+@router.post("/orders/{order_id}/restrict-user")
+async def order_restrict_user(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "restrict_users")
+    if deny:
+        return deny
+    _oid, user_id = await _order_user_id(session, order_id)
+    if user_id is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    if not reason:
+        return _order_back(order_id, error="a reason is required")
+    await user_service.set_restricted(
+        session, user_id, True, reason=reason, actor_id=admin.id,
+        ip_address=_client_ip(request),
+    )
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id,
+        action="user_restricted_from_receipt_review", target_type="user",
+        target_id=user_id, meta=f"order_id={order_id} reason={reason}",
+    )
+    await session.commit()
+    return _order_back(order_id, saved="user_restricted")
+
+
+@router.post("/orders/{order_id}/unrestrict-user")
+async def order_unrestrict_user(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "restrict_users")
+    if deny:
+        return deny
+    _oid, user_id = await _order_user_id(session, order_id)
+    if user_id is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    await user_service.set_restricted(
+        session, user_id, False, actor_id=admin.id, ip_address=_client_ip(request)
+    )
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="user_unrestricted",
+        target_type="user", target_id=user_id, meta=f"order_id={order_id}",
+    )
+    await session.commit()
+    return _order_back(order_id, saved="user_unrestricted")
 
 
 @router.get("/receipts/{payment_id}")

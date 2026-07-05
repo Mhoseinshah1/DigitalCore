@@ -217,6 +217,36 @@ async def admin_set_blocked(
     return user
 
 
+async def set_restricted(
+    session: AsyncSession,
+    user_id: int,
+    restricted: bool,
+    *,
+    reason: str | None = None,
+    restricted_until=None,
+    actor_id: int | None = None,
+    ip_address: str | None = None,
+) -> User | None:
+    """Restrict/unrestrict a user (softer than a block). Writes an audit row."""
+    user = await get_by_id(session, user_id)
+    if user is None:
+        return None
+    user.is_restricted = restricted
+    user.restriction_reason = (reason or None) if restricted else None
+    user.restricted_until = restricted_until if restricted else None
+    await audit_service.log(
+        session,
+        actor_type="admin",
+        actor_id=actor_id,
+        action="user.restricted" if restricted else "user.unrestricted",
+        target_type="user",
+        target_id=user.id,
+        new=(reason or None) if restricted else None,
+        ip_address=ip_address,
+    )
+    return user
+
+
 async def set_verified(
     session: AsyncSession,
     user_id: int,
@@ -281,6 +311,7 @@ async def adjust_wallet_balance(
     actor_type: str = "admin",
     actor_id: int | None = None,
     allow_negative: bool = False,
+    transaction_type: str = "admin_adjustment",
     ip_address: str | None = None,
 ) -> User:
     """Credit (+) or debit (-) a user's wallet.
@@ -306,7 +337,9 @@ async def adjust_wallet_balance(
         WalletTransaction(
             user_id=user.id,
             amount=amount,
+            balance_before=old_balance,
             balance_after=new_balance,
+            type=transaction_type,
             reason=(reason or "").strip() or None,
             actor_type=actor_type,
             actor_id=actor_id,

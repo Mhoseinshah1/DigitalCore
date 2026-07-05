@@ -55,6 +55,11 @@
           </td>
           <td class="actions">
             <a class="btn small" href="/admin/orders/{{ r.id }}">{{ _("web.orders.view") }}</a>
+            {% if pending_only and perms and perms.can_process and r.order_status == "waiting_admin" %}
+            <form method="post" action="/admin/orders/{{ r.id }}/approve">
+              <button type="submit" class="btn small primary">✅ {{ _("web.order.action.approve") }}</button>
+            </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

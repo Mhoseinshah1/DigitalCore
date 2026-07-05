@@ -30,7 +30,11 @@
       {% else %}<span class="pill ok">{{ _("users.status.active") }}</span>{% endif %}
       {% if summary.is_verified %}<span class="pill ok">{{ _("user.verified") }}</span>
       {% else %}<span class="pill">{{ _("user.unverified") }}</span>{% endif %}
+      {% if user.is_restricted %}<span class="pill warn">{{ _("web.order.user_restricted") }}</span>{% endif %}
     </p>
+    {% if user.is_restricted and user.restriction_reason %}
+    <p class="muted small">{{ _("web.order.field.reject_reason") }}: {{ user.restriction_reason }}</p>
+    {% endif %}
     <p class="wallet-big">💰 {{ "{:,}".format(summary.wallet_balance) }} <span class="muted">{{ _("user.toman") }}</span></p>
 
     {% if can_manage_users %}
@@ -101,8 +105,49 @@
   {% endif %}
 </section>
 
-<section class="panel muted-panel">
-  <h2>{{ _("user.future.title") }}</h2>
-  <p class="muted">{{ _("user.future.orders") }} · {{ _("user.future.licenses") }} · {{ _("user.future.services") }} · {{ _("user.future.payments") }} · {{ _("user.future.tickets") }} — <em>{{ _("web.placeholder.body") }}</em></p>
+{% if can_restrict_users %}
+<section class="panel">
+  <h2>{{ _("user.risk.title") }}</h2>
+  <div class="action-row">
+    {% if user.is_restricted %}
+    <form method="post" action="/admin/users/{{ user.id }}/unrestrict">
+      <button type="submit" class="btn">{{ _("web.order.action.unrestrict_user") }}</button>
+    </form>
+    {% else %}
+    <form method="post" action="/admin/users/{{ user.id }}/restrict" class="inline-form">
+      <input type="text" name="reason" placeholder="{{ _('web.order.action.reason') }}" required>
+      <button type="submit" class="btn">⚠️ {{ _("web.order.action.restrict_user") }}</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>{{ _("user.orders.title") }}</h2>
+  {% if not orders %}
+  <p class="muted">{{ _("orders.user.empty") }}</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.orders.col.number") }}</th><th>{{ _("web.orders.col.product") }}</th>
+        <th>{{ _("web.orders.col.amount") }}</th><th>{{ _("web.orders.col.order_status") }}</th>
+        <th>{{ _("web.orders.col.actions") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for o in orders %}
+        <tr>
+          <td><code>{{ o.number }}</code></td>
+          <td>{{ o.product_title }}</td>
+          <td>{{ "{:,}".format(o.amount) }}</td>
+          <td>{{ o.order_status_label }}</td>
+          <td class="actions"><a class="btn small" href="/admin/orders/{{ o.id }}">{{ _("web.orders.view") }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}

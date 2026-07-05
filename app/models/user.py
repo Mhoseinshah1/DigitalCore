@@ -28,6 +28,16 @@ class User(Base, TimestampMixin):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Restriction is softer than a block: the user can still open the bot and
+    # reach support/rules, but cannot order/buy/submit receipts/top up.
+    is_restricted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    restriction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    restricted_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Wallet balance in integer toman (the platform's money convention). A
     # dedicated wallet_transactions row records every change; no purchase logic
     # in this phase.

@@ -35,6 +35,10 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "broadcast",
         "manage_xui",
         "approve_payments",
+        # Phase 4 — receipt-review admin actions.
+        "process_payments",  # approve / reject a submitted receipt
+        "block_users",
+        "restrict_users",
     }
 )
 
@@ -57,14 +61,20 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "broadcast",
             "manage_xui",
             "approve_payments",
+            "process_payments",
+            "block_users",
+            "restrict_users",
         }
     ),
-    # Support: view users and block/unblock them; no settings or wallet.
-    Role.SUPPORT: frozenset({"view_dashboard", "view_users", "manage_users"}),
-    # Accountant: view users, adjust wallet, view payment settings/transactions;
-    # cannot change bot texts / block users.
+    # Support: view users, block/restrict them; no settings, wallet, or payments.
+    Role.SUPPORT: frozenset(
+        {"view_dashboard", "view_users", "manage_users", "block_users", "restrict_users"}
+    ),
+    # Accountant: view users, adjust wallet, view + process payments; cannot
+    # change bot texts or block/restrict users.
     Role.ACCOUNTANT: frozenset(
-        {"view_dashboard", "view_users", "adjust_wallet", "view_payments", "approve_payments"}
+        {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
+         "approve_payments", "process_payments"}
     ),
     # Viewer: read-only dashboard + users.
     Role.VIEWER: frozenset({"view_dashboard", "view_users"}),
@@ -148,3 +158,16 @@ def can_manage_xui_servers(role: object) -> bool:
 
 def can_manage_xui_inbounds(role: object) -> bool:
     return has_permission(role, "manage_xui")
+
+
+def can_process_payments(role: object) -> bool:
+    """Approve or reject a submitted receipt."""
+    return has_permission(role, "process_payments")
+
+
+def can_block_users(role: object) -> bool:
+    return has_permission(role, "block_users")
+
+
+def can_restrict_users(role: object) -> bool:
+    return has_permission(role, "restrict_users")
