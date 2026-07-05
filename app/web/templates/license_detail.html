@@ -41,6 +41,11 @@
       <button type="submit" class="btn danger">♻️ {{ _("web.licenses.action.replace") }}</button>
     </form>
     {% endif %}
+    {% if lic.status == "reserved" and lic.order_id %}
+    <form method="post" action="/admin/licenses/{{ lic.id }}/redeliver">
+      <button type="submit" class="btn">🔁 {{ _("web.licenses.action.retry_delivery") }}</button>
+    </form>
+    {% endif %}
     {% if lic.status in ("available","reserved") %}
     <form method="post" action="/admin/licenses/{{ lic.id }}/block">
       <button type="submit" class="btn">🚫 {{ _("web.licenses.action.block") }}</button>

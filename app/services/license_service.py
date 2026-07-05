@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.license_item import LicenseItem
+from app.models.order import Order
 from app.models.product import Product
 from app.services import audit_service, order_service
 
@@ -77,10 +78,20 @@ def parse_license_text(raw_text: str) -> tuple[list[dict], list[dict]]:
         is_kv = any(_KV_RE.match(ln) for ln in lines)
         if is_kv:
             kv: dict[str, str] = {}
+            unknown: list[str] = []
             for ln in lines:
                 m = _KV_RE.match(ln)
                 if m:
                     kv[m.group(1).lower()] = m.group(2).strip()
+                else:
+                    unknown.append(ln)  # a stray line inside an EMAIL/PASSWORD block
+            if unknown:
+                # Never silently drop lines — a typo'd key or pasted junk (e.g.
+                # `EMIAL: a@x.com`) would otherwise vanish and import bad data.
+                errors.append({"block": block_no,
+                               "error": "unrecognized line(s): " + "; ".join(unknown),
+                               "raw": block})
+                continue
             email, password = kv.get("email", ""), kv.get("password", "")
             note = kv.get("note") or None
             if not email or not password:
@@ -365,7 +376,25 @@ async def _deliver_to_user(bot, order, product, lic: LicenseItem, lang: str = "f
 async def deliver_license_for_order(
     session: AsyncSession, order_id: int, *, bot=None, actor_id: int | None = None,
 ) -> dict:
-    """Reserve + sell one license and deliver it. Idempotent per order."""
+    """Reserve + sell one license and deliver it. Idempotent per order.
+
+    The order row is locked FOR UPDATE and held for the WHOLE operation — there
+    is no intermediate commit — so two concurrent deliveries for the SAME order
+    serialize: the loser blocks, then sees status=delivered (or the already-
+    reserved license) and returns instead of reserving/selling a *second*
+    license. The lock is a no-op on SQLite (no row locks; single-writer anyway).
+
+    The reservation is inlined here rather than delegated to
+    ``reserve_available_license`` precisely because that helper writes an audit
+    row (which commits internally), and a mid-operation commit would release the
+    order lock and re-open the double-delivery race. All audit rows are therefore
+    written at the terminal points only.
+    """
+    # Serialize concurrent same-order deliveries on the order row (held until we
+    # return, i.e. until the terminal audit commit — no commit before then).
+    await session.execute(
+        select(Order.id).where(Order.id == order_id).with_for_update()
+    )
     order = await order_service.get_order(session, order_id)
     if order is None:
         raise LicenseError("order not found", code="order_not_found")
@@ -382,12 +411,20 @@ async def deliver_license_for_order(
     if order.status not in ("approved", "provisioning_pending"):
         raise LicenseError("order is not approved", code="not_approved")
 
-    # Reuse a license already reserved/sold for this order; else reserve a new one.
+    # Reuse a license already reserved/sold for this order; else reserve one
+    # (inline, without committing — see the docstring).
     lic = await get_license_by_order(session, order_id)
+    reserved_now = False
     if lic is None:
-        try:
-            lic = await reserve_available_license(session, product.id, order_id, order.user_id)
-        except NoLicenseAvailableError:
+        lic = await session.scalar(
+            select(LicenseItem)
+            .where(LicenseItem.product_id == product.id,
+                   LicenseItem.status == "available")
+            .order_by(LicenseItem.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        if lic is None:
             order.delivery_error = "no license available in stock"
             await audit_service.log(
                 session, actor_type="admin", actor_id=actor_id,
@@ -395,10 +432,22 @@ async def deliver_license_for_order(
                 meta=f"order={order.order_number} reason=no_stock",
             )
             return {"ok": False, "delivered": False, "reason": "no_license_available"}
+        lic.status = "reserved"
+        lic.order_id = order_id
+        lic.sold_to_user_id = order.user_id
+        lic.reserved_at = _now()
+        await session.flush()
+        reserved_now = True
 
     sent = await _deliver_to_user(bot, order, product, lic, order.user.language if order.user else "fa")
     if not sent:
         order.delivery_error = "telegram delivery failed"
+        if reserved_now:
+            await audit_service.log(
+                session, actor_type="system", actor_id=None, action="license_reserved",
+                target_type="license", target_id=lic.id,
+                meta=f"order_id={order_id} user_id={order.user_id}",
+            )
         await audit_service.log(
             session, actor_type="admin", actor_id=actor_id,
             action="license_delivery_failed", target_type="order", target_id=order.id,
@@ -413,6 +462,12 @@ async def deliver_license_for_order(
     order.delivered_at = _now()
     order.delivery_error = None
     order.delivered_payload = f"license #{lic.id} · {lic.email}"
+    if reserved_now:
+        await audit_service.log(
+            session, actor_type="system", actor_id=None, action="license_reserved",
+            target_type="license", target_id=lic.id,
+            meta=f"order_id={order_id} user_id={order.user_id}",
+        )
     await audit_service.log(
         session, actor_type="admin", actor_id=actor_id, action="license_sold",
         target_type="license", target_id=lic.id,
@@ -429,10 +484,20 @@ async def deliver_license_for_order(
 async def redeliver_license(
     session: AsyncSession, order_id: int, *, bot=None, admin_id: int | None = None,
 ) -> dict:
-    """Re-send the already-sold license to the original buyer (no new sale)."""
+    """Re-send the license for an order to its buyer.
+
+    - ``sold``: just re-send the credentials (no new sale).
+    - ``reserved``: a license whose first delivery failed and was left stranded —
+      finish the interrupted delivery (promotes it to ``sold`` on a successful
+      send). This is the admin's recovery path for a Telegram send failure.
+    """
     lic = await get_license_by_order(session, order_id)
-    if lic is None or lic.status != "sold":
-        raise LicenseError("no sold license for this order", code="no_sold_license")
+    if lic is None or lic.status not in ("sold", "reserved"):
+        raise LicenseError("no deliverable license for this order", code="no_sold_license")
+    if lic.status == "reserved":
+        return await deliver_license_for_order(
+            session, order_id, bot=bot, actor_id=admin_id
+        )
     order = await order_service.get_order(session, order_id)
     sent = await _deliver_to_user(bot, order, order.product, lic,
                                   order.user.language if order.user else "fa")

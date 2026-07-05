@@ -745,6 +745,7 @@ CATALOG: dict[str, str] = {
     "web.licenses.low.no_products": "هیچ محصول لایسنسی وجود ندارد.",
     "web.licenses.actions": "عملیات",
     "web.licenses.action.redeliver": "ارسال مجدد",
+    "web.licenses.action.retry_delivery": "تلاش مجدد برای ارسال",
     "web.licenses.action.replace": "جایگزینی",
     "web.licenses.action.block": "مسدودسازی",
     "web.licenses.action.mark_broken": "علامت خراب",

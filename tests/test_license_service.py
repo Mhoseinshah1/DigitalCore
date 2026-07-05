@@ -92,6 +92,22 @@ PASSWORD: p2
     assert r2["imported"] == 0 and r2["duplicates_in_db"] == 1
 
 
+def test_parse_kv_block_with_stray_line_is_error() -> None:
+    # A KV block with a valid email+password BUT an extra unrecognized line must
+    # be reported, never silently dropped (which would import bad/partial data).
+    items, errors = license_service.parse_license_text(
+        "EMAIL: a@x.com\nPASSWORD: p1\ngarbage line here")
+    assert not items
+    assert len(errors) == 1 and "unrecognized" in errors[0]["error"]
+
+
+def test_parse_kv_typo_key_is_error() -> None:
+    # A misspelled key (`EMIAL:`) makes the whole block an error rather than a
+    # license silently created with a missing email.
+    items, errors = license_service.parse_license_text("EMIAL: a@x.com\nPASSWORD: p1")
+    assert not items and len(errors) == 1
+
+
 async def test_import_rejects_non_license_product(db_session) -> None:
     p = Product(type="v2ray", title="VPN", price=1000, duration_days=30, traffic_gb=10,
                 is_active=True, is_hidden=False, xui_server_id=1, xui_inbound_id=1)
@@ -157,6 +173,59 @@ async def test_redeliver_same_license(db_session, tmp_path, monkeypatch) -> None
     first = list(sent)
     r = await license_service.redeliver_license(db_session, order.id, admin_id=9)
     assert r["ok"] and sent[-1] == first[-1]  # same license id re-sent
+
+
+async def test_stranded_reserved_license_recovers_on_retry(db_session, tmp_path, monkeypatch) -> None:
+    """A Telegram send failure leaves the license reserved; the admin retry
+    (redeliver) finishes the interrupted delivery, reusing the SAME reservation."""
+    calls = {"n": 0}
+    async def flaky(bot, order, product, lic, lang="fa"):
+        calls["n"] += 1
+        return calls["n"] > 1  # fail the first send, succeed on the retry
+    monkeypatch.setattr(license_service, "_deliver_to_user", flaky)
+
+    u, p, order = await _submitted_license_order(db_session, tmp_path)
+    await license_service.add_license(db_session, p.id, "s@x.com", "pw", admin_id=9)
+    await license_service.add_license(db_session, p.id, "spare@x.com", "pw", admin_id=9)
+    await db_session.commit()
+
+    # Approve → delivery fails at the send; the license is left reserved, the
+    # order flagged, and only ONE license consumed (the spare is untouched).
+    await payment_service.approve_payment(db_session, order.id, admin_id=None)
+    await db_session.commit()
+    stranded = await license_service.get_license_by_order(db_session, order.id)
+    o = await order_service.get_order(db_session, order.id)
+    assert stranded.status == "reserved"
+    assert o.status != "delivered" and o.delivery_error
+    assert await license_service.count_available(db_session, p.id) == 1
+
+    # Admin retry finishes delivery, reusing the same reserved license.
+    r = await license_service.redeliver_license(db_session, order.id, admin_id=9)
+    await db_session.commit()
+    assert r["ok"] and r.get("delivered") is True and r["license_id"] == stranded.id
+    done = await license_service.get_license(db_session, stranded.id)
+    o2 = await order_service.get_order(db_session, order.id)
+    assert done.status == "sold" and o2.status == "delivered" and not o2.delivery_error
+    # Still exactly one license consumed — no second reservation on retry.
+    assert await license_service.count_available(db_session, p.id) == 1
+
+
+async def test_delivery_reuses_reserved_license_never_double_reserves(db_session, tmp_path, monkeypatch) -> None:
+    """A second delivery for the SAME order reuses the already-reserved license
+    instead of reserving a second one (the invariant the order-row lock protects)."""
+    async def fail(bot, order, product, lic, lang="fa"):
+        return False
+    monkeypatch.setattr(license_service, "_deliver_to_user", fail)
+    u, p, order = await _submitted_license_order(db_session, tmp_path)
+    await license_service.add_license(db_session, p.id, "a@x.com", "pw", admin_id=9)
+    await license_service.add_license(db_session, p.id, "b@x.com", "pw", admin_id=9)
+    order.status = "approved"
+    await db_session.flush()
+
+    r1 = await license_service.deliver_license_for_order(db_session, order.id)
+    r2 = await license_service.deliver_license_for_order(db_session, order.id)
+    assert r1["license_id"] == r2["license_id"]  # same reservation reused
+    assert await license_service.count_available(db_session, p.id) == 1  # only one taken
 
 
 async def test_replacement_sells_new_marks_old(db_session, tmp_path) -> None:

@@ -745,6 +745,7 @@ CATALOG: dict[str, str] = {
     "web.licenses.low.no_products": "No license products exist.",
     "web.licenses.actions": "Actions",
     "web.licenses.action.redeliver": "Redeliver",
+    "web.licenses.action.retry_delivery": "Retry delivery",
     "web.licenses.action.replace": "Replace",
     "web.licenses.action.block": "Block",
     "web.licenses.action.mark_broken": "Mark broken",
