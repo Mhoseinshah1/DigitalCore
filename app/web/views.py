@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,10 +31,14 @@ from app.core.settings_service import SettingsService, coerce_out
 from app.database import get_session
 from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
+from app.models.payment import Payment
 from app.models.product import PRODUCT_TYPES, Product
+from app.core.statuses import order_status_label, payment_status_label
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
+    order_service,
+    payment_service,
     product_service,
     user_service,
     xui_server_service,
@@ -101,6 +105,13 @@ NAV_TREE: list[dict] = [
          "permission": "manage_products"},
     ]},
 
+    {"label_key": "nav.orders", "icon": "🧾", "children": [
+        {"label_key": "nav.orders.all", "icon": "🧾", "href": "/admin/orders",
+         "permission": "view_payments"},
+        {"label_key": "nav.orders.pending", "icon": "⏳", "href": "/admin/orders/pending-receipts",
+         "permission": "view_payments"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -134,8 +145,6 @@ NAV_TREE: list[dict] = [
     ]},
 
     {"label_key": "nav.future", "icon": "🧭", "children": [
-        {"label_key": "nav.future.orders", "icon": "🧾", "href": "/admin/orders",
-         "permission": "view_payments", "placeholder": True},
         {"label_key": "nav.future.licenses", "icon": "🔑", "href": "/admin/licenses",
          "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.services", "icon": "🌐", "href": "/admin/services",
@@ -161,7 +170,6 @@ PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
     ("/products/v2ray", "nav.products.v2ray", "manage_products"),
     ("/payments/wallet", "nav.payments.wallet", "view_payments"),
     ("/payments/receipts", "nav.payments.receipts", "view_payments"),
-    ("/orders", "nav.future.orders", "view_payments"),
     ("/licenses", "nav.future.licenses", "manage_products"),
     ("/services", "nav.future.services", "manage_products"),
     ("/tickets", "nav.future.tickets", "view_dashboard"),
@@ -1277,4 +1285,126 @@ async def xui_server_inbounds_json(
                 for ib in inbounds
             ],
         }
+    )
+
+
+# --------------------------------------------------------------------------
+# Orders + receipts (view_payments) — Phase 3.
+#
+# View-only queue: list orders, inspect one, and view its receipt. Approval,
+# rejection, and delivery are Phase 4 (only placeholder text here).
+# --------------------------------------------------------------------------
+def _order_row(order, lang: str) -> dict:
+    """A flat, template-ready view of an order + its payment."""
+    payment = order.payment
+    product = order.product
+    user = order.user
+    return {
+        "id": order.id,
+        "number": order.order_number,
+        "user_label": (user.username or (user.telegram_id and str(user.telegram_id))
+                       or f"#{user.id}") if user else "—",
+        "product_title": product.title if product else "—",
+        "product_type": product.type if product else "—",
+        "amount": order.final_amount,
+        "method": order.payment_method,
+        "order_status": order.status,
+        "order_status_label": order_status_label(order.status, lang),
+        "payment_status": payment.status if payment else None,
+        "payment_status_label": payment_status_label(payment.status, lang) if payment else "—",
+        "created_at": order.created_at,
+        "submitted_at": payment.submitted_at if payment else None,
+        "has_receipt": bool(payment and payment.receipt_path),
+        "payment_id": payment.id if payment else None,
+    }
+
+
+@router.get("/orders", response_class=HTMLResponse)
+async def orders_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    orders = await order_service.list_all_orders(session)
+    rows = [_order_row(o, lang) for o in orders]
+    return templates.TemplateResponse(
+        "orders.html",
+        _ctx(request, admin, rows=rows, pending_only=False),
+    )
+
+
+@router.get("/orders/pending-receipts", response_class=HTMLResponse)
+async def orders_pending_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    orders = await order_service.list_pending_receipt_orders(session)
+    rows = [_order_row(o, lang) for o in orders]
+    return templates.TemplateResponse(
+        "orders.html",
+        _ctx(request, admin, rows=rows, pending_only=True),
+    )
+
+
+@router.get("/orders/{order_id}", response_class=HTMLResponse)
+async def order_detail_page(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    order = await order_service.get_order(session, order_id)
+    if order is None:
+        return RedirectResponse("/admin/orders", status_code=302)
+    # Related audit rows for this order (best-effort; small list).
+    logs = [
+        r for r in await audit_service.list_recent(session, limit=500)
+        if (r.target_type == "order" and str(r.target_id) == str(order.id))
+        or (r.target_type == "payment" and order.payment and str(r.target_id) == str(order.payment.id))
+    ]
+    return templates.TemplateResponse(
+        "order_detail.html",
+        _ctx(request, admin, order=order, payment=order.payment, product=order.product,
+             user=order.user, row=_order_row(order, lang), logs=logs),
+    )
+
+
+@router.get("/receipts/{payment_id}")
+async def receipt_file(
+    payment_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a receipt to authenticated admins only, guarding path traversal."""
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    payment = await session.get(Payment, payment_id)
+    if payment is None or not payment.receipt_path:
+        return HTMLResponse(t("web.receipts.not_found", lang), status_code=404)
+    resolved = payment_service.resolve_receipt_path(payment.receipt_path)
+    if resolved is None:
+        return HTMLResponse(t("web.receipts.not_found", lang), status_code=404)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="admin_viewed_receipt",
+        target_type="payment", target_id=payment.id,
+    )
+    filename = payment.receipt_original_name or resolved.name
+    return FileResponse(
+        resolved,
+        media_type=payment.receipt_mime_type or "application/octet-stream",
+        filename=filename,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
     )

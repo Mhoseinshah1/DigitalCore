@@ -281,3 +281,7 @@ table.kv td { padding: .35rem 0; }
 .data-table td.neg { color: #ffc6cc; }
 
 .muted-panel { opacity: .85; }
+
+/* Phase 3: order detail panel headings */
+.panel-title { margin: 0 0 .6rem; font-size: 1.02rem; font-weight: 700; }
+.panel-subtitle { margin: 1rem 0 .4rem; font-size: .92rem; font-weight: 600; opacity: .9; }

@@ -85,9 +85,30 @@ async def test_ping_responds_pong(bot_db) -> None:
     assert msg.answers == [FA("ping")]
 
 
+class FakeState:
+    """Minimal FSMContext stand-in: just enough for handlers that clear state."""
+
+    def __init__(self) -> None:
+        self.cleared = False
+        self._data: dict = {}
+
+    async def clear(self) -> None:
+        self.cleared = True
+        self._data = {}
+
+    async def set_state(self, *_a, **_k) -> None:
+        pass
+
+    async def update_data(self, **kw) -> None:
+        self._data.update(kw)
+
+    async def get_data(self) -> dict:
+        return dict(self._data)
+
+
 async def test_products_placeholder_when_empty(bot_db) -> None:
     msg = FakeMessage(FakeUser(70004))
-    await on_products(msg, FA, lang="fa")
+    await on_products(msg, FA, FakeState(), lang="fa")
     assert msg.answers == [FA("products.user.empty")]
 
 
@@ -99,7 +120,7 @@ async def test_products_lists_active_visible(bot_db) -> None:
                       is_active=True, is_hidden=True))
         await s.commit()
     msg = FakeMessage(FakeUser(70005))
-    await on_products(msg, FA, lang="fa")
+    await on_products(msg, FA, FakeState(), lang="fa")
     body = "\n".join(msg.answers)
     assert "Gold Plan" in body
     assert "Hidden Plan" not in body

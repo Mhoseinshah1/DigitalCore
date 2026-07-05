@@ -1,0 +1,278 @@
+"""Phase 3 bot purchase flow: Buy -> order -> card-to-card instructions ->
+receipt upload -> waiting_admin, plus /orders (My Orders).
+
+Only card-to-card is supported. No delivery, approval, or provisioning happens
+here — the receipt just lands in the admin review queue.
+"""
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from io import BytesIO
+
+from aiogram import Bot, F, Router
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+
+from app.core.settings_service import SettingsService
+from app.core.statuses import order_status_label
+from app.database import SessionLocal
+from app.i18n import t, texts_for
+from app.services import order_service, payment_service, product_service, user_service
+from app.services.order_service import OrderError
+from app.services.payment_service import ReceiptError, ReceiptFile
+
+log = logging.getLogger("bot.user.orders")
+
+router = Router(name="user.orders")
+
+CB_BUY = "ubuy:"
+
+
+class PurchaseStates(StatesGroup):
+    waiting_for_receipt = State()
+
+
+# Menu buttons/commands that must never be swallowed by the receipt-wait guidance.
+_NAV_TEXTS: set[str] = set()
+for _key in ("btn.products", "btn.account", "btn.support", "btn.rules",
+             "btn.language", "btn.admin_panel", "btn.my_orders"):
+    _NAV_TEXTS |= texts_for(_key)
+
+
+def _order_error_text(exc: OrderError, _: Callable[..., str]) -> str:
+    """Map an OrderError.code to a specific message, else a generic one."""
+    key = f"purchase.{exc.code}"
+    text = _(key)
+    return text if text != key else _("purchase.error", error=str(exc))
+
+
+def _receipt_error_text(exc: ReceiptError, _: Callable[..., str]) -> str:
+    key = f"purchase.receipt.{exc.code}"
+    text = _(key)
+    return text if text != key else _("purchase.receipt_rejected", error=str(exc))
+
+
+def _payment_instruction_lines(order, product, cfg: dict[str, str], _: Callable[..., str]) -> list[str]:
+    lines = [
+        _("purchase.instructions_title"),
+        "",
+        _("purchase.order_number", number=order.order_number),
+        _("purchase.product", title=product.title),
+        _("purchase.amount", amount=f"{order.final_amount:,}"),
+        "",
+        _("purchase.pay_header"),
+        _("purchase.card_number", card=cfg["card_number"]),
+    ]
+    if cfg.get("card_owner"):
+        lines.append(_("purchase.card_owner", owner=cfg["card_owner"]))
+    if cfg.get("sheba_number"):
+        lines.append(_("purchase.sheba", sheba=cfg["sheba_number"]))
+    if cfg.get("payment_instructions"):
+        lines.extend(["", cfg["payment_instructions"]])
+    lines.extend(["", _("purchase.ask_receipt")])
+    return lines
+
+
+@router.callback_query(F.data.startswith(CB_BUY))
+async def on_buy(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """Create the order + payment and show card-to-card instructions."""
+    product_id = int((callback.data or "0")[len(CB_BUY):])
+    # callback.message is a Message (or InaccessibleMessage) for button presses;
+    # both support .answer(). Only None for some inline cases.
+    reply = callback.message
+    tg_user = callback.from_user
+
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not await svc.get_bool("sales_enabled", True):
+            await callback.answer(_("purchase.sales_disabled"), show_alert=True)
+            return
+        if not await svc.get_bool("card_to_card_enabled", True):
+            await callback.answer(_("purchase.card_disabled"), show_alert=True)
+            return
+        cfg = {
+            "card_number": (await svc.get_str("card_number", "")).strip(),
+            "card_owner": (await svc.get_str("card_owner", "")).strip(),
+            "sheba_number": (await svc.get_str("sheba_number", "")).strip(),
+            "payment_instructions": (await svc.get_str("payment_instructions", "")).strip(),
+        }
+        if not cfg["card_number"]:
+            await callback.answer()
+            if reply is not None:
+                await reply.answer(_("purchase.not_configured"))
+            return
+
+        user, _created = await user_service.create_or_update_from_telegram(
+            session, telegram_id=tg_user.id, username=tg_user.username,
+            first_name=tg_user.first_name, last_name=tg_user.last_name,
+        )
+        await session.commit()
+
+        try:
+            order = await order_service.create_order(session, user.id, product_id)
+            payment = await payment_service.create_payment_for_order(session, order)
+            await session.commit()
+        except OrderError as exc:
+            await callback.answer()
+            if reply is not None:
+                await reply.answer(_order_error_text(exc, _))
+            return
+
+        product = await product_service.get(session, product_id)
+        lines = _payment_instruction_lines(order, product, cfg, _)
+
+    await state.set_state(PurchaseStates.waiting_for_receipt)
+    await state.update_data(order_id=order.id)
+    await callback.answer()
+    if reply is not None:
+        await reply.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def _download_telegram_file(bot: Bot, file_id: str) -> bytes:
+    """Download a Telegram file into memory. Isolated so tests can monkeypatch it."""
+    tg_file = await bot.get_file(file_id)
+    buf = BytesIO()
+    await bot.download_file(tg_file.file_path, destination=buf)
+    return buf.getvalue()
+
+
+def _extract_file(message: Message) -> tuple[str, str, str | None, int] | None:
+    """(file_id, original_name, mime, size) for a photo/document, or None."""
+    if message.photo:
+        photo = message.photo[-1]  # largest size
+        return photo.file_id, "receipt.jpg", "image/jpeg", photo.file_size or 0
+    if message.document:
+        doc = message.document
+        return doc.file_id, (doc.file_name or "receipt"), doc.mime_type, (doc.file_size or 0)
+    return None
+
+
+async def _handle_receipt(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext,
+    lang: str, order_id: int | None,
+) -> None:
+    extracted = _extract_file(message)
+    if extracted is None:
+        return
+    file_id, original_name, mime, size = extracted
+
+    # Cheap pre-download rejection for wrong type / obviously-too-big files.
+    try:
+        payment_service.precheck_receipt(original_name, size, mime)
+    except ReceiptError as exc:
+        await message.answer(_receipt_error_text(exc, _))
+        return
+
+    tg_user = message.from_user
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        if user is None:
+            await message.answer(_("purchase.no_pending_order"))
+            return
+        resolved_order_id = order_id
+        if resolved_order_id is None:
+            pending = await order_service.latest_pending_order(session, user.id)
+            if pending is None:
+                await message.answer(_("purchase.no_pending_order"))
+                return
+            resolved_order_id = pending.id
+
+        try:
+            content = await _download_telegram_file(bot, file_id)
+        except Exception as exc:  # noqa: BLE001 - network/telegram error
+            log.warning("Receipt download failed: %s", exc)
+            await message.answer(_("purchase.download_failed"))
+            return
+
+        file_info = ReceiptFile(
+            content=content, original_name=original_name, mime_type=mime, file_id=file_id
+        )
+        try:
+            payment = await payment_service.submit_receipt(
+                session, resolved_order_id, user.id, file_info
+            )
+            await session.commit()
+        except ReceiptError as exc:
+            await message.answer(_receipt_error_text(exc, _))
+            return
+
+        order = await order_service.get_order(session, resolved_order_id)
+        product = order.product
+
+    await state.clear()
+    await message.answer(_("purchase.receipt_saved"))
+
+    # Best-effort admin notification (never breaks the user's flow).
+    try:
+        from app.bot.notifications import notify_receipt_submitted
+
+        await notify_receipt_submitted(
+            bot, order=order, payment=payment, product=product, user=user, lang=lang
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Admin receipt notification failed: %s", exc)
+
+
+@router.message(PurchaseStates.waiting_for_receipt, F.photo | F.document)
+async def on_receipt_in_state(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    data = await state.get_data()
+    await _handle_receipt(message, bot, _, state, lang, data.get("order_id"))
+
+
+@router.message(F.photo | F.document)
+async def on_receipt_stateless(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    # A receipt sent without an active buy flow: try the latest pending order.
+    await _handle_receipt(message, bot, _, state, lang, None)
+
+
+@router.message(
+    PurchaseStates.waiting_for_receipt,
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(_NAV_TEXTS),
+)
+async def on_receipt_wrong_type(message: Message, _: Callable[..., str]) -> None:
+    await message.answer(_("purchase.receipt_required_file"))
+
+
+@router.callback_query(F.data == "receipt_next_phase")
+async def on_receipt_next_phase(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    """Placeholder for the disabled approve/reject button (arrives in Phase 4)."""
+    await callback.answer(_("notify.receipt.next_phase"), show_alert=True)
+
+
+@router.message(Command("orders"))
+@router.message(F.text.in_(texts_for("btn.my_orders")))
+async def on_orders(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    await state.clear()
+    tg_user = message.from_user
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        orders = await order_service.list_user_orders(session, user.id) if user else []
+
+    if not orders:
+        await message.answer(_("orders.user.empty"))
+        return
+
+    lines = [_("orders.user.title"), ""]
+    for o in orders:
+        title = o.product.title if o.product else "—"
+        created = o.created_at.strftime("%Y-%m-%d") if o.created_at else ""
+        lines.append(
+            f"• <code>{o.order_number}</code> · {title} · "
+            f"{o.final_amount:,} · {order_status_label(o.status, lang)} · {created}"
+        )
+    await message.answer("\n".join(lines), parse_mode="HTML")

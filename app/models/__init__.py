@@ -8,6 +8,8 @@ from app.models.product import Product
 from app.models.wallet_transaction import WalletTransaction
 from app.models.xui_server import XuiServer
 from app.models.xui_inbound import XuiInbound
+from app.models.order import Order
+from app.models.payment import Payment
 
 __all__ = [
     "Base",
@@ -19,4 +21,6 @@ __all__ = [
     "WalletTransaction",
     "XuiServer",
     "XuiInbound",
+    "Order",
+    "Payment",
 ]

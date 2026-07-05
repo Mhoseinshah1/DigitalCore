@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{% if pending_only %}{{ _("web.orders.pending_title") }}{% else %}{{ _("web.orders.title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if pending_only %}{{ _("web.orders.pending_title") }}{% else %}{{ _("web.orders.title") }}{% endif %}</h1>
+  <p class="muted">{% if pending_only %}{{ _("web.orders.pending_subtitle") }}{% else %}{{ _("web.orders.subtitle") }}{% endif %}</p>
+</header>
+
+{% if pending_only %}
+<div class="alert">{{ _("web.orders.pending_note") }}</div>
+{% endif %}
+
+{% if not rows %}
+<section class="note"><p class="muted">{% if pending_only %}{{ _("web.orders.pending_empty") }}{% else %}{{ _("web.orders.empty") }}{% endif %}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.orders.col.number") }}</th>
+          <th>{{ _("web.orders.col.user") }}</th>
+          <th>{{ _("web.orders.col.product") }}</th>
+          <th>{{ _("web.orders.col.type") }}</th>
+          <th>{{ _("web.orders.col.amount") }}</th>
+          <th>{{ _("web.orders.col.method") }}</th>
+          <th>{{ _("web.orders.col.order_status") }}</th>
+          <th>{{ _("web.orders.col.payment_status") }}</th>
+          <th>{{ _("web.orders.col.created") }}</th>
+          <th>{{ _("web.orders.col.submitted") }}</th>
+          <th>{{ _("web.orders.col.receipt") }}</th>
+          <th>{{ _("web.orders.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><code>{{ r.number }}</code></td>
+          <td>{{ r.user_label }}</td>
+          <td>{{ r.product_title }}</td>
+          <td>{{ _("product.type." ~ r.product_type) if r.product_type in ("license", "v2ray") else r.product_type }}</td>
+          <td>{{ "{:,}".format(r.amount) }}</td>
+          <td>{{ _("web.orders.method." ~ r.method) if r.method in ("card_to_card", "wallet", "gateway") else r.method }}</td>
+          <td>
+            {% if r.order_status == "waiting_admin" %}<span class="pill ok">{{ r.order_status_label }}</span>
+            {% elif r.order_status in ("cancelled", "rejected", "failed") %}<span class="pill">{{ r.order_status_label }}</span>
+            {% else %}<span class="pill">{{ r.order_status_label }}</span>{% endif %}
+          </td>
+          <td>{{ r.payment_status_label }}</td>
+          <td class="muted small">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "—" }}</td>
+          <td class="muted small">{{ r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "—" }}</td>
+          <td>
+            {% if r.has_receipt %}<a class="btn small" href="/admin/receipts/{{ r.payment_id }}" target="_blank">{{ _("web.order.view_receipt") }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/admin/orders/{{ r.id }}">{{ _("web.orders.view") }}</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,10 +1,12 @@
-"""User product list: visible products with a detail view (no ordering yet)."""
+"""User product list + detail. Buying is wired to the Phase 3 order flow
+(see app/bot/handlers/user/orders.py, which owns the Buy callback)."""
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.database import SessionLocal
@@ -15,6 +17,8 @@ from app.services import product_service, xui_server_service
 router = Router(name="user.products")
 
 CB_DETAIL = "uprod:"
+CB_BUY = "ubuy:"
+CB_LIST = "uprods"
 
 
 def _price_text(product: Product, lang: str) -> str:
@@ -48,9 +52,7 @@ def build_detail_lines(product: Product, server_name: str | None, lang: str) -> 
     return lines
 
 
-@router.message(Command("products"))
-@router.message(F.text.in_(texts_for("btn.products")))
-async def on_products(message: Message, _: Callable[..., str], lang: str = "fa") -> None:
+async def render_product_list(message: Message, _: Callable[..., str], lang: str) -> None:
     async with SessionLocal() as session:
         products = await product_service.list_for_user(session)
 
@@ -72,6 +74,24 @@ async def on_products(message: Message, _: Callable[..., str], lang: str = "fa")
     )
 
 
+@router.message(Command("products"))
+@router.message(F.text.in_(texts_for("btn.products")))
+async def on_products(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    await state.clear()  # leaving any pending receipt-wait
+    await render_product_list(message, _, lang)
+
+
+@router.callback_query(F.data == CB_LIST)
+async def on_products_back(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    if isinstance(callback.message, Message):
+        await render_product_list(callback.message, _, lang)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith(CB_DETAIL))
 async def on_product_detail(
     callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
@@ -89,9 +109,12 @@ async def on_product_detail(
             server_name = server.name if server is not None else None
 
     lines = build_detail_lines(product, server_name, lang)
-    # Buying is not enabled yet (arrives in a later phase).
-    lines.extend(["", _("products.user.buy_soon")])
-
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=_("btn.buy"), callback_data=f"{CB_BUY}{product.id}")],
+        [InlineKeyboardButton(text=_("btn.back"), callback_data=CB_LIST)],
+    ])
     if isinstance(callback.message, Message):
-        await callback.message.answer("\n".join(lines), parse_mode="HTML")
+        await callback.message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=keyboard
+        )
     await callback.answer()

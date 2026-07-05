@@ -67,6 +67,49 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
 `xui_server_created/updated/deactivated/tested`, `xui_inbounds_synced`,
 `xui_inbound_created/updated/deactivated`, `product_bound_to_xui`.
 
+- **Phase 3 — done.** **Orders & card-to-card receipt flow.** From the bot a user
+  opens the product list, taps **Buy**, and an **order** (`pending_payment`) plus a
+  **payment** (`pending`) are created; the bot then shows the card-to-card details
+  from **Settings → Payment** (`card_number` / `card_owner` / `sheba_number` /
+  `payment_instructions`). The user uploads a receipt (jpg/jpeg/png/webp/pdf,
+  ≤ 10 MB), it is stored safely on disk and the order moves to `waiting_admin`,
+  the payment to `receipt_submitted`. Admins see the pending queue in the panel
+  and get a Telegram notification (with the receipt). **Not** in this phase:
+  approval/rejection, license delivery, V2Ray client creation, subscription/QR
+  links, wallet payments, coupons/referrals/tickets/reports/gateway — those are
+  Phase 4+.
+
+### Phase 3 — orders & card-to-card receipts
+
+**Bot flow** (`app/bot/handlers/user/{products,orders}.py`): Buy → `create_order`
++ `create_payment_for_order` → card-to-card instructions → the user sends the
+receipt as a photo/document → it is downloaded, validated, stored, and the order
+enters the admin review queue. A robust FSM (`waiting_for_receipt`) plus a
+stateless fallback means a receipt is matched to the user's latest pending order
+even without an active flow; wrong file types, oversize files, and text-instead-of-file
+each get a clear message. `/orders` (My Orders) lists the user's orders with Persian
+statuses.
+
+**Receipt storage.** Files live at
+`storage/receipts/YYYY/MM/<order_number>_<safe_filename>` (the `./storage` volume
+is mounted into the containers, so receipts persist). Only the **relative path** +
+metadata (mime, original name, size, Telegram file_id) are stored in `payments`;
+the bytes never touch the DB or audit log. Filenames are sanitised and the serving
+route re-validates containment to defeat path traversal.
+
+**Admin panel** — a new **Orders** sidebar group (permission `view_payments`):
+
+| Area | Routes |
+|------|--------|
+| Orders | `GET /admin/orders` (all), `GET /admin/orders/pending-receipts` (waiting_admin only), `GET /admin/orders/{id}` (detail + timeline + related audit) |
+| Receipts | `GET /admin/receipts/{payment_id}` — admin-only, inline, `nosniff` + `no-store`, path-traversal-safe |
+
+Order/payment state machines are stored in full but only `pending_payment →
+waiting_admin → cancelled` and `pending → receipt_submitted` are exercised;
+approval/rejection/delivery buttons are placeholders. Persian/English status labels
+come from `app/core/statuses.py`. Audited actions: `order_created`,
+`payment_created`, `receipt_submitted`, `order_cancelled`, `admin_viewed_receipt`.
+
 ### Phase 2 admin panel
 
 The panel is served at **`/admin`** (login at `/admin/login`; `/` and `/login`
@@ -312,15 +355,35 @@ Migrations are explicit (`op.create_table`, not `create_all`); the backend does
 `admins`, `users` (telegram profile + `wallet_balance`, `is_blocked`,
 `is_verified`, `admin_note`, `language_code`), `settings` (key/value/is_secret),
 `products`, `audit_logs` (+ `meta`/`ip_address`), `wallet_transactions` (signed
-ledger), and the 3X-UI tables. Phase 2 adds migration **0008** (user/audit
-columns, `wallet_transactions`, settings-key reconciliation); Phase 2.1 adds
-migration **0009** (`xui_servers.is_active/last_error`, nullable
-`username`/`encrypted_password`, `xui_inbounds.network/security`, and the
-`products.xui_server_id/xui_inbound_id` FK bindings). Both run cleanly on a fresh
-**and** an existing database and preserve operator-entered values.
+ledger), the 3X-UI tables, and the `orders`/`payments` tables. Phase 2 adds
+migration **0008** (user/audit columns, `wallet_transactions`, settings-key
+reconciliation); Phase 2.1 adds migration **0009**
+(`xui_servers.is_active/last_error`, nullable `username`/`encrypted_password`,
+`xui_inbounds.network/security`, and the `products.xui_server_id/xui_inbound_id`
+FK bindings); Phase 3 adds migration **0010** (the `orders` and `payments`
+tables). All run cleanly on a fresh **and** an existing database and preserve
+operator-entered values.
 
 Run `python -m app.seed` once after migrating to insert the default settings
 rows (idempotent; never overwrites custom values).
+
+## Phase 3 manual test checklist
+
+1. Log in to the admin panel and open **Settings → Payment**; set the card
+   number, card owner, SHEBA, and payment instructions.
+2. Under **Products**, create an active **license** product (and, if XUI servers
+   exist, an active **V2Ray** product bound to a server + inbound).
+3. In the bot: `/start` → open **Products** → pick a product → tap **Buy**.
+4. Confirm the order is created and the card-to-card instructions appear.
+5. Send a receipt photo/document; confirm the *“receipt recorded, awaiting admin
+   review”* reply.
+6. In the panel, open **Orders → Pending receipts** and confirm the order shows
+   up as `waiting_admin` with the receipt link.
+7. Open the receipt via `/admin/receipts/{id}` — it must only load while logged
+   in as an admin.
+8. In the bot, `/orders` (My Orders) shows the order with its Persian status.
+9. Confirm **nothing is delivered** yet (no license shown, no V2Ray client) —
+   approval/rejection and delivery arrive in **Phase 4**.
 
 ## Environment
 

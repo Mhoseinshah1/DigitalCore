@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.order.detail_title", number=order.order_number) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.order.detail_title", number=order.order_number) }}</h1>
+  <p class="muted"><a href="/admin/orders">{{ _("web.order.back") }}</a></p>
+</header>
+
+<div class="alert">{{ _("web.order.approve_placeholder") }}</div>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.field.number") }}</h2>
+  <dl class="kv">
+    <dt>{{ _("web.order.field.number") }}</dt><dd><code>{{ order.order_number }}</code></dd>
+    <dt>{{ _("web.order.field.status") }}</dt><dd><span class="pill">{{ row.order_status_label }}</span></dd>
+    <dt>{{ _("web.order.field.payment_status") }}</dt><dd>{{ row.payment_status_label }}</dd>
+    <dt>{{ _("web.order.field.amount") }}</dt><dd>{{ "{:,}".format(order.final_amount) }}</dd>
+    <dt>{{ _("web.order.field.method") }}</dt><dd>{{ _("web.orders.method." ~ order.payment_method) if order.payment_method in ("card_to_card", "wallet", "gateway") else order.payment_method }}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.user_info") }}</h2>
+  <dl class="kv">
+    <dt>{{ _("web.order.field.user") }}</dt><dd>{{ row.user_label }}</dd>
+    <dt>{{ _("web.order.field.telegram") }}</dt><dd>{{ user.telegram_id if user else "—" }}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.product_info") }}</h2>
+  <dl class="kv">
+    <dt>{{ _("web.order.field.product") }}</dt><dd>{{ product.title if product else "—" }}</dd>
+    <dt>{{ _("web.order.field.type") }}</dt><dd>{{ _("product.type." ~ product.type) if product and product.type in ("license", "v2ray") else "—" }}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.payment_info") }}</h2>
+  {% if payment %}
+  <dl class="kv">
+    <dt>{{ _("web.order.field.payment_status") }}</dt><dd>{{ row.payment_status_label }}</dd>
+    {% if payment.tracking_code %}<dt>{{ _("web.order.field.tracking") }}</dt><dd>{{ payment.tracking_code }}</dd>{% endif %}
+  </dl>
+  <h3 class="panel-subtitle">{{ _("web.order.receipt") }}</h3>
+  {% if row.has_receipt %}
+    <p><a class="btn" href="/admin/receipts/{{ payment.id }}" target="_blank">{{ _("web.order.view_receipt") }}</a></p>
+    {% if (payment.receipt_mime_type or "").startswith("image/") %}
+    <p><img src="/admin/receipts/{{ payment.id }}" alt="receipt" style="max-width:320px;max-height:320px;border-radius:8px"></p>
+    {% endif %}
+  {% else %}
+    <p class="muted">{{ _("web.order.no_receipt") }}</p>
+  {% endif %}
+  {% else %}
+  <p class="muted">{{ _("web.order.no_receipt") }}</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.timeline") }}</h2>
+  <dl class="kv">
+    <dt>{{ _("web.order.field.created") }}</dt><dd class="muted">{{ order.created_at.strftime("%Y-%m-%d %H:%M") if order.created_at else "—" }}</dd>
+    {% if payment and payment.submitted_at %}<dt>{{ _("web.order.field.submitted") }}</dt><dd class="muted">{{ payment.submitted_at.strftime("%Y-%m-%d %H:%M") }}</dd>{% endif %}
+    {% if order.cancelled_at %}<dt>{{ _("web.order.field.cancelled") }}</dt><dd class="muted">{{ order.cancelled_at.strftime("%Y-%m-%d %H:%M") }}</dd>{% endif %}
+  </dl>
+</section>
+
+{% if logs %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.order.audit") }}</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <tbody>
+        {% for r in logs %}
+        <tr>
+          <td class="muted small">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</td>
+          <td>{{ r.action }}</td>
+          <td class="muted">{{ r.new_value or r.meta or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
