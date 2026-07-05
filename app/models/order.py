@@ -26,6 +26,7 @@ ORDER_STATUSES: tuple[str, ...] = (
     "pending_payment",
     "waiting_admin",
     "approved",
+    "provisioning_pending",  # approved, awaiting V2Ray provisioning (Phase 6)
     "rejected",
     "cancelled",
     "failed",
@@ -69,9 +70,12 @@ class Order(Base, TimestampMixin):
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # What was delivered after approval: a license code, or v2ray credentials /
-    # subscription reference. Filled by delivery_service; never a secret token.
+    # A non-secret summary of what was delivered (e.g. "license #12 · a@b.com").
+    # Never contains a password. Filled by delivery_service.
     delivered_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set when an approved order could not be delivered (empty stock, send failed)
+    # so an admin can retry. Cleared on a successful (re)delivery.
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Lifecycle timestamps (created_at/updated_at come from TimestampMixin).
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -87,6 +87,54 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   **view user**. Restricted users can still `/start` and read rules/support but
   cannot order, buy, or submit receipts. **Not** in this phase: subscription/QR
   link generation, wallet *purchase*/top-up, gateways, coupons/referrals/tickets.
+- **Phase 5 — done.** **License stock + real license delivery.** License products
+  are now fully functional: admins import email/password licenses (parsed text /
+  CSV / file) into a per-product stock, and when a license order is approved the
+  dispatcher **reserves and sells exactly one** license (row-locked so it is never
+  sold twice), attaches it to the order + buyer, sends the credentials to the user
+  in Telegram, and marks the order `delivered`. Users see their licenses with
+  `/my_licenses`; admins get stock/sold/low-stock pages, a detail page (password
+  gated by permission), and redeliver/replace/block/mark-broken actions. V2Ray
+  approval is still a placeholder (`provisioning_pending`) — real 3X-UI
+  provisioning and subscription/QR links are **Phase 6**.
+
+### Phase 5 — license stock & real license delivery
+
+**Stock + import** (`app/services/license_service.py`, `license_items` table):
+licenses are `EMAIL:/PASSWORD:/NOTE:` blocks (blank-line separated, keys
+case-insensitive, note optional) or `email,password,note` CSV lines. Import
+reports imported / duplicate-in-file / duplicate-in-DB / invalid counts and never
+imports malformed blocks silently. A license moves `available → reserved → sold`;
+admins can also `blocked`/`broken`/`replaced` it.
+
+**Delivery** — approving a license order calls the dispatcher, which reserves one
+`available` license with `SELECT … FOR UPDATE SKIP LOCKED` (a real lock on
+Postgres), sends the credentials to the buyer, then flips it to `sold` and the
+order to `delivered`. It is **idempotent**: re-approving or re-delivering a
+delivered order never sells a second license. If stock is empty or the Telegram
+send fails, the license stays reserved/attached and the order keeps a
+`delivery_error` so an admin can **redeliver**. **Replacement** swaps the sold
+license for a fresh one (old → `replaced`, `replaced_by_license_id` set) and
+re-notifies the user.
+
+| Area | Routes / commands |
+|------|-------------------|
+| Web stock | `GET /admin/licenses` (product+status filters), `/admin/licenses/sold`, `/admin/licenses/low-stock` |
+| Web import | `GET/POST /admin/licenses/import` (license products only) |
+| Web detail + actions | `GET /admin/licenses/{id}`, `POST …/{id}/{block,mark-broken,redeliver,replace}` |
+| Bot user | `/my_licenses` (My Licenses) — own licenses only |
+| Bot admin | `/admin_licenses`, `/admin_license_stock` — available/sold + low-stock |
+
+**Low stock** — the `license_low_stock_threshold` setting (default **5**) drives
+the Low stock page and a `low_stock_detected` audit when a sale drops stock below
+it. **Security**: passwords are stored (delivery needs them) but never appear on
+list pages, never in audit metadata (emails are masked, e.g. `a***@x.com`), and a
+password shows on the detail page only with `view_license_secrets`. Permissions:
+owner/admin manage + import + view secrets; support view-only; accountant/viewer
+counts only. Audited: `license_added`, `license_bulk_imported`,
+`license_import_failed`, `license_reserved`, `license_sold`, `license_delivered`,
+`license_delivery_failed`, `license_redelivered`, `license_marked_broken`,
+`license_blocked`, `license_replaced`, `low_stock_detected`.
 
 ### Phase 4 — approval, delivery & receipt-review quick actions
 
@@ -414,8 +462,10 @@ reconciliation); Phase 2.1 adds migration **0009**
 FK bindings); Phase 3 adds migration **0010** (the `orders` and `payments`
 tables); Phase 4 adds migration **0011** (`users.is_restricted/restriction_reason/
 restricted_until`, `wallet_transactions.balance_before/type`,
-`orders.delivered_payload`, and the `license_keys` pool table). All run cleanly on
-a fresh **and** an existing database and preserve operator-entered values.
+`orders.delivered_payload`, and a first `license_keys` pool table); Phase 5 adds
+migration **0012** (the real `license_items` stock table + `orders.delivery_error`,
+and drops the superseded `license_keys` table). All run cleanly on a fresh **and**
+an existing database and preserve operator-entered values.
 
 Run `python -m app.seed` once after migrating to insert the default settings
 rows (idempotent; never overwrites custom values).
@@ -439,7 +489,7 @@ rows (idempotent; never overwrites custom values).
 
 ## Phase 4 manual test checklist
 
-1. Stock license keys for a license product (via `license_service.add_keys`).
+1. Import licenses for a license product (see the Phase 5 import page).
 2. As a user, order the product and submit a receipt (Phase 3 flow).
 3. In **Orders → Pending receipts** (or the Telegram notification), open the receipt.
 4. Click **Add balance**, enter an amount + reason → the user's wallet increases,
@@ -448,14 +498,29 @@ rows (idempotent; never overwrites custom values).
    user detail page.
 6. Click **Restrict user** with a reason → the user can `/start` but cannot create
    a new order or submit a receipt; **unrestrict** to reverse it.
-7. Click **Approve** → the order becomes `delivered` and the license code shows in
-   the order detail (`delivered_payload`). For a V2Ray product a client is
-   provisioned on the bound server/inbound.
+7. Click **Approve** → a license order becomes `delivered` (see Phase 5); a V2Ray
+   order parks at `provisioning_pending`.
 8. Reject a different receipt with a reason; confirm duplicate approve/reject is
    blocked.
 9. Repeat the same actions from the **Telegram** notification buttons (approve,
    reject, add/subtract balance, block, restrict, view user) — confirm only the
    admin who started an FSM action can finish it, and `/cancel` aborts.
+
+## Phase 5 manual test checklist
+
+1. Log in; create or use a **license** product.
+2. Open **Licenses → Import licenses**, choose the product, and paste two blocks:
+   `EMAIL: test1@example.com / PASSWORD: pass1 / NOTE: note1` and a second one.
+3. Confirm the import result (imported 2) and that **License stock** shows them as
+   `available` — with **no password** in the list.
+4. In the bot, buy the product, submit a receipt, and **approve** it.
+5. Confirm the buyer receives the EMAIL / PASSWORD / NOTE in Telegram, the order is
+   `delivered`, the payment `approved`, and the license `sold` with
+   `sold_to_user_id` + `order_id` set.
+6. `/my_licenses` shows the license; re-approving the same order sells **no** second
+   license; **redeliver** re-sends the same one.
+7. Confirm **Licenses → Low stock** warns when available drops below the threshold,
+   and that no license password appears in the audit log.
 
 ## Environment
 

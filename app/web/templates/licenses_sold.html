@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.licenses.sold.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.licenses.sold.title") }}</h1>
+  <p class="muted">{{ _("web.licenses.sold.subtitle") }}</p>
+</header>
+
+{% if not licenses %}
+<section class="note"><p class="muted">{{ _("web.licenses.sold.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.licenses.col.email") }}</th>
+        <th>{{ _("web.licenses.col.product") }}</th>
+        <th>{{ _("web.licenses.col.buyer") }}</th>
+        <th>{{ _("web.licenses.col.order") }}</th>
+        <th>{{ _("web.licenses.col.sold_at") }}</th>
+        <th>{{ _("web.licenses.col.actions") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for l in licenses %}
+        <tr>
+          <td>{{ l.email }}</td>
+          <td>{{ l.product.title if l.product else "—" }}</td>
+          <td>{% if l.sold_to_user %}{{ l.sold_to_user.username or l.sold_to_user.telegram_id or ("#" ~ l.sold_to_user_id) }}{% else %}—{% endif %}</td>
+          <td>{% if l.order_id %}<a href="/admin/orders/{{ l.order_id }}">#{{ l.order_id }}</a>{% else %}—{% endif %}</td>
+          <td class="muted small">{{ l.sold_at.strftime("%Y-%m-%d %H:%M") if l.sold_at else "—" }}</td>
+          <td class="actions"><a class="btn small" href="/admin/licenses/{{ l.id }}">{{ _("web.licenses.view") }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

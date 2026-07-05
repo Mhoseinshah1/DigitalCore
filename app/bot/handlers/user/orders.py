@@ -14,15 +14,28 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app.core.settings_service import SettingsService
 from app.core.statuses import order_status_label
 from app.database import SessionLocal
 from app.i18n import t, texts_for
-from app.services import order_service, payment_service, product_service, user_service
+from app.services import (
+    license_service,
+    order_service,
+    payment_service,
+    product_service,
+    user_service,
+)
 from app.services.order_service import OrderError
 from app.services.payment_service import ReceiptError, ReceiptFile
+
+CB_LICENSE = "ulic:"
 
 log = logging.getLogger("bot.user.orders")
 
@@ -38,7 +51,7 @@ class PurchaseStates(StatesGroup):
 # Menu buttons/commands that must never be swallowed by the receipt-wait guidance.
 _NAV_TEXTS: set[str] = set()
 for _key in ("btn.products", "btn.account", "btn.support", "btn.rules",
-             "btn.language", "btn.admin_panel", "btn.my_orders"):
+             "btn.language", "btn.admin_panel", "btn.my_orders", "btn.my_licenses"):
     _NAV_TEXTS |= texts_for(_key)
 
 
@@ -276,3 +289,54 @@ async def on_orders(
             f"{o.final_amount:,} · {order_status_label(o.status, lang)} · {created}"
         )
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("my_licenses"))
+@router.message(F.text.in_(texts_for("btn.my_licenses")))
+async def on_my_licenses(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    await state.clear()
+    tg_user = message.from_user
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        licenses = await license_service.list_user_licenses(session, user.id) if user else []
+
+    if not licenses:
+        await message.answer(_("licenses.user.empty"))
+        return
+
+    lines = [_("licenses.user.title"), ""]
+    buttons: list[list[InlineKeyboardButton]] = []
+    for lic in licenses:
+        title = lic.product.title if lic.product else "—"
+        sold = lic.sold_at.strftime("%Y-%m-%d") if lic.sold_at else ""
+        order_no = f" · #{lic.order_id}" if lic.order_id else ""
+        lines.append(f"• {title}{order_no} · {sold}")
+        buttons.append([InlineKeyboardButton(
+            text=title, callback_data=f"{CB_LICENSE}{lic.id}")])
+    await message.answer(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith(CB_LICENSE))
+async def on_license_detail(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    license_id = int((callback.data or "0")[len(CB_LICENSE):])
+    tg_user = callback.from_user
+    text: str | None = None
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        lic = await license_service.get_license(session, license_id)
+        # Never reveal a license that is not this user's.
+        if user is None or lic is None or lic.sold_to_user_id != user.id:
+            await callback.answer(_("licenses.user.not_found"), show_alert=True)
+            return
+        order = await order_service.get_order(session, lic.order_id) if lic.order_id else None
+        text = license_service.build_delivery_message(order, lic.product, lic, lang)
+    if callback.message is not None and text:
+        await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()

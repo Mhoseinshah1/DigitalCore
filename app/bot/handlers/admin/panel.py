@@ -62,6 +62,34 @@ async def on_admin_stats(
     await message.answer(await build_overview(lang, _), parse_mode="HTML")
 
 
+@router.message(Command("admin_licenses"))
+@router.message(Command("admin_license_stock"))
+async def on_admin_licenses(
+    message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    if not has_permission(role, "view_licenses"):
+        await message.answer(_("admin.not_authorized"))
+        return
+    from app.services import license_service, product_service
+    async with SessionLocal() as session:
+        products = [p for p in await product_service.list_for_admin(session)
+                    if p.type == "license"]
+        threshold = await SettingsService(session).get_int("license_low_stock_threshold", 5)
+        rows = []
+        for p in products:
+            counts = await license_service.count_by_status(session, p.id)
+            rows.append((p, counts.get("available", 0), counts.get("sold", 0)))
+    if not rows:
+        await message.answer(_("admin.licenses.none"))
+        return
+    lines = [_("admin.licenses.title"), ""]
+    for p, avail, sold in rows:
+        warn = " ⚠️" if avail < threshold else ""
+        lines.append(_("admin.licenses.row", title=p.title, avail=avail, sold=sold) + warn)
+    lines += ["", _("admin.licenses.threshold", n=threshold)]
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 @router.message(Command("admin_users"))
 async def on_admin_users(
     message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None

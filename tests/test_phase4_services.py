@@ -40,6 +40,14 @@ async def _submitted_order(db_session, user, product, tmp_path):
     return order
 
 
+@pytest.fixture(autouse=True)
+def _stub_license_delivery(monkeypatch):
+    """Pretend the Telegram send always succeeds so license delivery finalizes."""
+    async def _ok(bot, order, product, lic, lang="fa"):
+        return True
+    monkeypatch.setattr(license_service, "_deliver_to_user", _ok)
+
+
 # --- wallet ------------------------------------------------------------------
 async def test_wallet_add_and_subtract_transactional(db_session) -> None:
     u = await _user(db_session)
@@ -91,44 +99,33 @@ async def test_set_restricted_updates_fields_and_audit(db_session) -> None:
     assert "user.restricted" in actions and "user.unrestricted" in actions
 
 
-# --- license pool ------------------------------------------------------------
-async def test_license_pool_add_and_assign(db_session) -> None:
-    p = await _license_product(db_session)
-    added = await license_service.add_keys(db_session, p.id, ["A", "B", "A"], actor_id=9)
-    assert added == 2  # duplicate "A" skipped
-    assert await license_service.available_count(db_session, p.id) == 2
-    key = await license_service.assign_next(db_session, p.id, order_id=123)
-    assert key.is_used and key.order_id == 123
-    assert await license_service.available_count(db_session, p.id) == 1
-
-
 # --- approve / reject / delivery --------------------------------------------
 async def test_approve_delivers_license(db_session, tmp_path) -> None:
     u = await _user(db_session)
     p = await _license_product(db_session)
-    await license_service.add_keys(db_session, p.id, ["LIC-1"], actor_id=9)
+    await license_service.add_license(db_session, p.id, "lic1@x.com", "pw1", admin_id=9)
     order = await _submitted_order(db_session, u, p, tmp_path)
     await db_session.commit()
 
     result = await payment_service.approve_payment(db_session, order.id, admin_id=None)
     await db_session.commit()
     o = await order_service.get_order(db_session, order.id)
-    assert o.status == "delivered" and o.delivered_payload == "LIC-1"
+    assert o.status == "delivered" and "lic1@x.com" in (o.delivered_payload or "")
     assert result["delivery"]["delivered"] is True
     actions = [r.action for r in (await db_session.execute(select(AuditLog))).scalars().all()]
-    assert "payment_approved" in actions and "order_delivered" in actions
+    assert "payment_approved" in actions and "license_delivered" in actions
 
 
-async def test_approve_without_keys_stays_approved(db_session, tmp_path) -> None:
+async def test_approve_without_stock_stays_approved(db_session, tmp_path) -> None:
     u = await _user(db_session)
-    p = await _license_product(db_session)  # no keys stocked
+    p = await _license_product(db_session)  # no licenses stocked
     order = await _submitted_order(db_session, u, p, tmp_path)
     await db_session.commit()
     result = await payment_service.approve_payment(db_session, order.id, admin_id=None)
     await db_session.commit()
     o = await order_service.get_order(db_session, order.id)
     assert o.status == "approved" and o.delivered_payload is None
-    assert result["delivery"]["reason"] == "no_license_keys"
+    assert o.delivery_error and result["delivery"]["reason"] == "no_license_available"
 
 
 async def test_reject_sets_reason(db_session, tmp_path) -> None:
@@ -155,7 +152,7 @@ async def test_reject_requires_reason(db_session, tmp_path) -> None:
 async def test_duplicate_approve_and_reject_blocked(db_session, tmp_path) -> None:
     u = await _user(db_session)
     p = await _license_product(db_session)
-    await license_service.add_keys(db_session, p.id, ["K"], actor_id=9)
+    await license_service.add_license(db_session, p.id, "k@x.com", "pw", admin_id=9)
     order = await _submitted_order(db_session, u, p, tmp_path)
     await db_session.commit()
     await payment_service.approve_payment(db_session, order.id, admin_id=None)
@@ -167,7 +164,8 @@ async def test_duplicate_approve_and_reject_blocked(db_session, tmp_path) -> Non
         await payment_service.reject_payment(db_session, order.id, admin_id=None, reason="x")
 
 
-async def test_v2ray_delivery_via_mocked_panel(db_session, tmp_path, monkeypatch) -> None:
+async def test_v2ray_approve_parks_provisioning_pending(db_session, tmp_path, monkeypatch) -> None:
+    """Phase 5: v2ray is placeholder-only — no 3X-UI client is created yet."""
     from app.models import XuiInbound, XuiServer
     from app.services import xui_service
 
@@ -184,12 +182,10 @@ async def test_v2ray_delivery_via_mocked_panel(db_session, tmp_path, monkeypatch
     u = await _user(db_session, tg=222)
     await db_session.flush()
 
-    called = {}
+    called = {"add_client": False}
 
-    async def fake_add_client(srv, inbound_id, client, **kw):
-        called["inbound_id"] = inbound_id
-        called["email"] = client.email
-        return None
+    async def fake_add_client(*a, **kw):
+        called["add_client"] = True
 
     monkeypatch.setattr(xui_service, "add_client", fake_add_client)
 
@@ -198,6 +194,6 @@ async def test_v2ray_delivery_via_mocked_panel(db_session, tmp_path, monkeypatch
     result = await payment_service.approve_payment(db_session, order.id, admin_id=None)
     await db_session.commit()
     o = await order_service.get_order(db_session, order.id)
-    assert o.status == "delivered"
-    assert called["inbound_id"] == 7
-    assert result["delivery"]["delivered"] is True
+    assert o.status == "provisioning_pending"
+    assert result["delivery"]["delivered"] is False
+    assert called["add_client"] is False  # no panel call in Phase 5

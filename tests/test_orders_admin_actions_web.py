@@ -28,6 +28,10 @@ async def env(monkeypatch, tmp_path) -> AsyncIterator[dict]:
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(payment_service, "RECEIPTS_ROOT", tmp_path)
 
+    async def _ok(bot, order, product, lic, lang="fa"):
+        return True
+    monkeypatch.setattr(license_service, "_deliver_to_user", _ok)
+
     async def _override():
         async with maker() as s:
             yield s
@@ -55,7 +59,7 @@ async def env(monkeypatch, tmp_path) -> AsyncIterator[dict]:
             p = Product(type="license", title="Key", price=50000, is_active=True, is_hidden=False)
             s.add(p)
             await s.flush()
-            await license_service.add_keys(s, p.id, ["LIC-1"], actor_id=1)
+            await license_service.add_license(s, p.id, "web1@x.com", "pw", admin_id=1)
             order = await order_service.create_order(s, u.id, p.id)
             await payment_service.create_payment_for_order(s, order)
             fi = ReceiptFile(content=b"\x89PNG\r\n\x1a\n" + b"x" * 20,
@@ -94,7 +98,7 @@ async def test_admin_approve_delivers(env) -> None:
     assert r.status_code == 303 and "saved=approved" in r.headers["location"]
     async with env["maker"]() as s:
         o = await order_service.get_order(s, oid)
-    assert o.status == "delivered" and o.delivered_payload == "LIC-1"
+    assert o.status == "delivered" and "web1@x.com" in (o.delivered_payload or "")
 
 
 async def test_add_balance_requires_permission(env) -> None:

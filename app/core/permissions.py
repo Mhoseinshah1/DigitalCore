@@ -39,6 +39,11 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "process_payments",  # approve / reject a submitted receipt
         "block_users",
         "restrict_users",
+        # Phase 5 — license stock.
+        "view_licenses",         # see license pages (no passwords)
+        "view_license_secrets",  # reveal a license password on the detail page
+        "import_licenses",       # import / add licenses
+        "manage_licenses",       # block / mark-broken / redeliver / replace
     }
 )
 
@@ -64,20 +69,26 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "process_payments",
             "block_users",
             "restrict_users",
+            "view_licenses",
+            "view_license_secrets",
+            "import_licenses",
+            "manage_licenses",
         }
     ),
-    # Support: view users, block/restrict them; no settings, wallet, or payments.
+    # Support: view users, block/restrict them, view license status (no secrets,
+    # no import); no settings, wallet, or payments.
     Role.SUPPORT: frozenset(
-        {"view_dashboard", "view_users", "manage_users", "block_users", "restrict_users"}
+        {"view_dashboard", "view_users", "manage_users", "block_users",
+         "restrict_users", "view_licenses"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; cannot
     # change bot texts or block/restrict users.
     Role.ACCOUNTANT: frozenset(
         {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
-         "approve_payments", "process_payments"}
+         "approve_payments", "process_payments", "view_licenses"}
     ),
-    # Viewer: read-only dashboard + users.
-    Role.VIEWER: frozenset({"view_dashboard", "view_users"}),
+    # Viewer: read-only dashboard + users + license counts (no secrets).
+    Role.VIEWER: frozenset({"view_dashboard", "view_users", "view_licenses"}),
 }
 
 
@@ -171,3 +182,19 @@ def can_block_users(role: object) -> bool:
 
 def can_restrict_users(role: object) -> bool:
     return has_permission(role, "restrict_users")
+
+
+def can_view_licenses(role: object) -> bool:
+    return has_permission(role, "view_licenses")
+
+
+def can_manage_licenses(role: object) -> bool:
+    return has_permission(role, "manage_licenses")
+
+
+def can_view_license_secrets(role: object) -> bool:
+    return has_permission(role, "view_license_secrets")
+
+
+def can_import_licenses(role: object) -> bool:
+    return has_permission(role, "import_licenses")

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.licenses.import.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.licenses.import.title") }}</h1>
+  <p class="muted">{{ _("web.licenses.import.subtitle") }}</p>
+</header>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if result %}
+<div class="alert ok">
+  {{ _("web.licenses.import.result", imported=result.imported, dup_file=result.duplicates_in_file,
+        dup_db=result.duplicates_in_db, invalid=result.invalid) }}
+</div>
+{% if result.errors %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.licenses.import.errors") }}</h2>
+  <ul>
+    {% for e in result.errors %}
+    <li class="muted">#{{ e.block }} — {{ e.error }}{% if e.raw %}: <code>{{ e.raw|truncate(60) }}</code>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+
+{% if not products %}
+<section class="note"><p class="muted">{{ _("web.licenses.import.no_products") }}</p></section>
+{% else %}
+<form method="post" action="/admin/licenses/import" enctype="multipart/form-data" class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="product_id">{{ _("web.licenses.import.product") }}</label>
+        <select id="product_id" name="product_id" required>
+          {% for p in products %}
+          <option value="{{ p.id }}" {% if product_id and product_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-text">
+        <label for="raw_text">{{ _("web.licenses.import.textarea") }}</label>
+        <textarea id="raw_text" name="raw_text" rows="10" placeholder="EMAIL: a@example.com&#10;PASSWORD: pass1&#10;NOTE: optional&#10;&#10;EMAIL: b@example.com&#10;PASSWORD: pass2"></textarea>
+      </div>
+      <div class="field">
+        <label for="file">{{ _("web.licenses.import.file") }}</label>
+        <input id="file" name="file" type="file" accept=".txt,.csv">
+        <small class="muted">{{ _("web.licenses.import.file_hint") }}</small>
+      </div>
+    </div>
+  </section>
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.licenses.import.submit") }}</button>
+    <a class="btn" href="/admin/licenses">{{ _("web.licenses.import.cancel") }}</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

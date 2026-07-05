@@ -37,6 +37,7 @@ from app.core.statuses import order_status_label, payment_status_label
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
+    license_service,
     order_service,
     payment_service,
     product_service,
@@ -113,6 +114,17 @@ NAV_TREE: list[dict] = [
          "permission": "view_payments"},
     ]},
 
+    {"label_key": "nav.licenses", "icon": "🔑", "children": [
+        {"label_key": "nav.licenses.stock", "icon": "🔑", "href": "/admin/licenses",
+         "permission": "view_licenses"},
+        {"label_key": "nav.licenses.import", "icon": "📥", "href": "/admin/licenses/import",
+         "permission": "import_licenses"},
+        {"label_key": "nav.licenses.sold", "icon": "✅", "href": "/admin/licenses/sold",
+         "permission": "view_licenses"},
+        {"label_key": "nav.licenses.low_stock", "icon": "📉", "href": "/admin/licenses/low-stock",
+         "permission": "view_licenses"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -146,8 +158,6 @@ NAV_TREE: list[dict] = [
     ]},
 
     {"label_key": "nav.future", "icon": "🧭", "children": [
-        {"label_key": "nav.future.licenses", "icon": "🔑", "href": "/admin/licenses",
-         "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.services", "icon": "🌐", "href": "/admin/services",
          "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.tickets", "icon": "🎫", "href": "/admin/tickets",
@@ -171,7 +181,6 @@ PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
     ("/products/v2ray", "nav.products.v2ray", "manage_products"),
     ("/payments/wallet", "nav.payments.wallet", "view_payments"),
     ("/payments/receipts", "nav.payments.receipts", "view_payments"),
-    ("/licenses", "nav.future.licenses", "manage_products"),
     ("/services", "nav.future.services", "manage_products"),
     ("/tickets", "nav.future.tickets", "view_dashboard"),
     ("/coupons", "nav.future.coupons", "manage_products"),
@@ -1681,3 +1690,234 @@ async def receipt_file(
         content_disposition_type="inline",
         headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
     )
+
+
+# --------------------------------------------------------------------------
+# Licenses (Phase 5) — stock, import, sold, low-stock, detail + actions.
+#
+# List pages never show a password; the detail page reveals it only to admins
+# with `view_license_secrets`. Import needs `import_licenses`; block/mark-broken/
+# redeliver/replace need `manage_licenses`.
+# --------------------------------------------------------------------------
+async def _license_products(session: AsyncSession):
+    products = await product_service.list_for_admin(session)
+    return [p for p in products if p.type == "license"]
+
+
+@router.get("/licenses", response_class=HTMLResponse)
+async def licenses_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    product_id: int = 0,
+    status: str = "",
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_licenses")
+    if deny:
+        return deny
+    licenses = await license_service.list_licenses(
+        session, product_id=(product_id or None), status=(status or None), limit=200
+    )
+    return templates.TemplateResponse(
+        "licenses.html",
+        _ctx(request, admin, licenses=licenses, products=await _license_products(session),
+             product_id=product_id, status=status, saved=saved, error=error),
+    )
+
+
+@router.get("/licenses/import", response_class=HTMLResponse)
+async def license_import_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "import_licenses")
+    if deny:
+        return deny
+    return templates.TemplateResponse(
+        "license_import.html",
+        _ctx(request, admin, products=await _license_products(session), result=None, error=""),
+    )
+
+
+@router.post("/licenses/import", response_class=HTMLResponse)
+async def license_import_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "import_licenses")
+    if deny:
+        return deny
+    form = await request.form()
+    product_id = _parse_int_opt(form.get("product_id"))
+    raw_text = str(form.get("raw_text", "") or "")
+    upload = form.get("file")
+    if upload is not None and hasattr(upload, "read"):
+        data = await upload.read()
+        if data:
+            raw_text = (raw_text + "\n" + data.decode("utf-8", errors="replace")).strip()
+    result = None
+    error = ""
+    try:
+        if not product_id:
+            raise ValueError("please choose a license product")
+        result = await license_service.bulk_import_licenses(
+            session, product_id, raw_text, admin_id=admin.id
+        )
+        await session.commit()
+    except (ValueError, license_service.LicenseError) as exc:
+        error = str(exc)
+    return templates.TemplateResponse(
+        "license_import.html",
+        _ctx(request, admin, products=await _license_products(session),
+             result=result, error=error, product_id=product_id or 0),
+    )
+
+
+@router.get("/licenses/sold", response_class=HTMLResponse)
+async def licenses_sold_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_licenses")
+    if deny:
+        return deny
+    licenses = await license_service.list_sold(session, limit=200)
+    return templates.TemplateResponse(
+        "licenses_sold.html", _ctx(request, admin, licenses=licenses),
+    )
+
+
+@router.get("/licenses/low-stock", response_class=HTMLResponse)
+async def licenses_low_stock_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_licenses")
+    if deny:
+        return deny
+    threshold = await SettingsService(session).get_int("license_low_stock_threshold", 5)
+    products = await _license_products(session)
+    rows = []
+    for p in products:
+        avail = await license_service.count_available(session, p.id)
+        rows.append({"product": p, "available": avail, "threshold": threshold,
+                     "low": avail < threshold})
+    return templates.TemplateResponse(
+        "licenses_low_stock.html",
+        _ctx(request, admin, rows=rows, threshold=threshold),
+    )
+
+
+@router.get("/licenses/{license_id}", response_class=HTMLResponse)
+async def license_detail_page(
+    license_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_licenses")
+    if deny:
+        return deny
+    lic = await license_service.get_license(session, license_id)
+    if lic is None:
+        return RedirectResponse("/admin/licenses", status_code=302)
+    return templates.TemplateResponse(
+        "license_detail.html",
+        _ctx(request, admin, lic=lic,
+             can_secrets=has_permission(admin.role, "view_license_secrets"),
+             can_manage=has_permission(admin.role, "manage_licenses"),
+             saved=saved, error=error),
+    )
+
+
+def _license_back(license_id: int, *, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/licenses/{license_id}?{q}", status_code=303)
+
+
+@router.post("/licenses/{license_id}/block")
+async def license_block(
+    license_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_licenses")
+    if deny:
+        return deny
+    try:
+        await license_service.block_license(session, license_id, admin_id=admin.id)
+        await session.commit()
+    except license_service.LicenseError as exc:
+        return _license_back(license_id, error=str(exc))
+    return _license_back(license_id, saved="blocked")
+
+
+@router.post("/licenses/{license_id}/mark-broken")
+async def license_mark_broken(
+    license_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_licenses")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip() or None
+    await license_service.mark_license_broken(session, license_id, admin_id=admin.id, reason=reason)
+    await session.commit()
+    return _license_back(license_id, saved="marked_broken")
+
+
+@router.post("/licenses/{license_id}/redeliver")
+async def license_redeliver(
+    license_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_licenses")
+    if deny:
+        return deny
+    lic = await license_service.get_license(session, license_id)
+    if lic is None or not lic.order_id:
+        return _license_back(license_id, error="license is not attached to an order")
+    result = await license_service.redeliver_license(session, lic.order_id, admin_id=admin.id)
+    await session.commit()
+    if not result.get("ok"):
+        return _license_back(license_id, error="redelivery failed")
+    return _license_back(license_id, saved="redelivered")
+
+
+@router.post("/licenses/{license_id}/replace")
+async def license_replace(
+    license_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_licenses")
+    if deny:
+        return deny
+    lic = await license_service.get_license(session, license_id)
+    if lic is None or not lic.order_id:
+        return _license_back(license_id, error="license is not attached to an order")
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip() or None
+    try:
+        await license_service.replace_license(
+            session, lic.order_id, admin_id=admin.id, reason=reason
+        )
+        await session.commit()
+    except license_service.LicenseError as exc:
+        return _license_back(license_id, error=str(exc))
+    return _license_back(license_id, saved="replaced")

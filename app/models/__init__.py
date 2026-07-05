@@ -10,7 +10,7 @@ from app.models.xui_server import XuiServer
 from app.models.xui_inbound import XuiInbound
 from app.models.order import Order
 from app.models.payment import Payment
-from app.models.license_key import LicenseKey
+from app.models.license_item import LicenseItem
 
 __all__ = [
     "Base",
@@ -24,5 +24,5 @@ __all__ = [
     "XuiInbound",
     "Order",
     "Payment",
-    "LicenseKey",
+    "LicenseItem",
 ]

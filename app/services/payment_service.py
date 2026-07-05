@@ -247,7 +247,8 @@ def _ensure_reviewable(order, payment) -> None:
 
 
 async def approve_payment(
-    session: AsyncSession, order_id: int, *, admin_id: int | None, deliver: bool = True
+    session: AsyncSession, order_id: int, *, admin_id: int | None, deliver: bool = True,
+    bot=None,
 ) -> dict:
     """Approve a submitted receipt and (optionally) attempt delivery."""
     order = await order_service.get_order(session, order_id)
@@ -274,7 +275,9 @@ async def approve_payment(
     delivery = {"delivered": False, "reason": "skipped"}
     if deliver:
         from app.services import delivery_service
-        delivery = await delivery_service.deliver_order(session, order, actor_id=admin_id)
+        delivery = await delivery_service.deliver_order(
+            session, order, actor_id=admin_id, bot=bot
+        )
     await session.refresh(order)
     return {"order": order, "payment": payment, "delivery": delivery}
 

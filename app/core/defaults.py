@@ -150,6 +150,11 @@ DEFAULTS: list[SettingDef] = [
                description="Permit admin wallet debits to push a balance below zero.",
                label_fa="اجازه موجودی منفی کیف پول",
                description_fa="اجازه بدهی که موجودی کیف پول را زیر صفر ببرد."),
+    SettingDef("license_low_stock_threshold", "general", "int", default="5",
+               label="License low-stock threshold",
+               description="Warn when a license product's available stock falls below this.",
+               label_fa="آستانه هشدار کمبود لایسنس",
+               description_fa="هشدار وقتی موجودی لایسنس یک محصول کمتر از این مقدار شود."),
 
     # ---------------- Bot messages ----------------
     SettingDef("start_text", "texts", "text",

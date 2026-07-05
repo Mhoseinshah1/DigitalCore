@@ -98,7 +98,7 @@ async def _answer(callback: CallbackQuery, text: str) -> None:
 @router.callback_query(F.data.startswith(CB))
 async def on_receipt_action(
     callback: CallbackQuery, _: Callable[..., str], state: FSMContext,
-    role: Role | None = None, is_admin: bool = False, lang: str = "fa",
+    bot=None, role: Role | None = None, is_admin: bool = False, lang: str = "fa",
 ) -> None:
     parsed = _parse(callback.data)
     if parsed is None:
@@ -135,7 +135,9 @@ async def on_receipt_action(
 
         if action == "approve":
             try:
-                result = await payment_service.approve_payment(session, order_id, admin_id=None)
+                result = await payment_service.approve_payment(
+                    session, order_id, admin_id=None, bot=bot
+                )
                 await session.commit()
             except payment_service.ReceiptError as exc:
                 await callback.answer(_(f"radm.err.{exc.code}") if _(f"radm.err.{exc.code}") != f"radm.err.{exc.code}"

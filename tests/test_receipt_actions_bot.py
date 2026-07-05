@@ -63,6 +63,10 @@ async def db(monkeypatch):
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(ra, "SessionLocal", maker)
     monkeypatch.setattr(payment_service, "RECEIPTS_ROOT", Path(tempfile.mkdtemp()))
+
+    async def _ok(bot, order, product, lic, lang="fa"):
+        return True
+    monkeypatch.setattr(license_service, "_deliver_to_user", _ok)
     try:
         yield maker
     finally:
@@ -76,7 +80,7 @@ async def _submitted(maker) -> tuple[int, int]:
         p = Product(type="license", title="Key", price=50000, is_active=True, is_hidden=False)
         s.add(p)
         await s.flush()
-        await license_service.add_keys(s, p.id, ["LIC-1"], actor_id=ADMIN)
+        await license_service.add_license(s, p.id, "bot1@x.com", "pw", admin_id=ADMIN)
         order = await order_service.create_order(s, u.id, p.id)
         await payment_service.create_payment_for_order(s, order)
         fi = ReceiptFile(content=b"\x89PNG\r\n\x1a\n" + b"x" * 20,

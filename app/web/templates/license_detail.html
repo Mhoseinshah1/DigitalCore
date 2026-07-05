@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.licenses.detail_title", id=lic.id) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.licenses.detail_title", id=lic.id) }}</h1>
+  <p class="muted"><a href="/admin/licenses">{{ _("web.licenses.back") }}</a></p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.licenses.flash." ~ saved) }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel">
+  <dl class="kv">
+    <dt>{{ _("web.licenses.col.email") }}</dt><dd><code>{{ lic.email }}</code></dd>
+    <dt>{{ _("web.licenses.col.password") }}</dt>
+    <dd>
+      {% if can_secrets %}<code>{{ lic.password }}</code>
+      {% else %}<span class="muted">{{ _("web.licenses.password_hidden") }}</span>{% endif %}
+    </dd>
+    {% if lic.note %}<dt>{{ _("web.licenses.note") }}</dt><dd>{{ lic.note }}</dd>{% endif %}
+    <dt>{{ _("web.licenses.col.product") }}</dt><dd>{{ lic.product.title if lic.product else "—" }}</dd>
+    <dt>{{ _("web.licenses.col.status") }}</dt><dd><span class="pill">{{ _("license.status." ~ lic.status) }}</span></dd>
+    <dt>{{ _("web.licenses.col.buyer") }}</dt><dd>{% if lic.sold_to_user %}{{ lic.sold_to_user.username or lic.sold_to_user.telegram_id or ("#" ~ lic.sold_to_user_id) }}{% else %}—{% endif %}</dd>
+    <dt>{{ _("web.licenses.col.order") }}</dt><dd>{% if lic.order_id %}<a href="/admin/orders/{{ lic.order_id }}">#{{ lic.order_id }}</a>{% else %}—{% endif %}</dd>
+    <dt>{{ _("web.licenses.col.sold_at") }}</dt><dd class="muted">{{ lic.sold_at.strftime("%Y-%m-%d %H:%M") if lic.sold_at else "—" }}</dd>
+    {% if lic.replaced_by_license_id %}<dt>{{ _("web.licenses.replaced_by") }}</dt><dd><a href="/admin/licenses/{{ lic.replaced_by_license_id }}">#{{ lic.replaced_by_license_id }}</a></dd>{% endif %}
+    {% if lic.admin_note %}<dt>{{ _("web.licenses.admin_note") }}</dt><dd>{{ lic.admin_note }}</dd>{% endif %}
+  </dl>
+</section>
+
+{% if can_manage %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.licenses.actions") }}</h2>
+  <div class="action-row">
+    {% if lic.status == "sold" %}
+    <form method="post" action="/admin/licenses/{{ lic.id }}/redeliver">
+      <button type="submit" class="btn">🔁 {{ _("web.licenses.action.redeliver") }}</button>
+    </form>
+    <form method="post" action="/admin/licenses/{{ lic.id }}/replace" class="inline-form">
+      <input type="text" name="reason" placeholder="{{ _('web.order.action.reason') }}">
+      <button type="submit" class="btn danger">♻️ {{ _("web.licenses.action.replace") }}</button>
+    </form>
+    {% endif %}
+    {% if lic.status in ("available","reserved") %}
+    <form method="post" action="/admin/licenses/{{ lic.id }}/block">
+      <button type="submit" class="btn">🚫 {{ _("web.licenses.action.block") }}</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/admin/licenses/{{ lic.id }}/mark-broken" class="inline-form">
+      <input type="text" name="reason" placeholder="{{ _('web.order.action.reason') }}">
+      <button type="submit" class="btn danger">💔 {{ _("web.licenses.action.mark_broken") }}</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

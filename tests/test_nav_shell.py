@@ -115,9 +115,9 @@ async def test_placeholder_requires_login() -> None:
 
 
 async def test_placeholder_respects_permission(client_with_role) -> None:
-    # viewer lacks manage_products -> /admin/licenses is forbidden.
+    # viewer lacks manage_products -> the /admin/services placeholder is forbidden.
     client = await client_with_role("viewer")
-    r = await client.get("/admin/licenses")
+    r = await client.get("/admin/services")
     assert r.status_code == 403
 
 

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.licenses.low.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.licenses.low.title") }}</h1>
+  <p class="muted">{{ _("web.licenses.low.subtitle", threshold=threshold) }}</p>
+</header>
+
+{% if not rows %}
+<section class="note"><p class="muted">{{ _("web.licenses.low.no_products") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.licenses.col.product") }}</th>
+        <th>{{ _("web.licenses.low.available") }}</th>
+        <th>{{ _("web.licenses.low.threshold") }}</th>
+        <th>{{ _("web.licenses.col.status") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.product.title }}</td>
+          <td>{{ r.available }}</td>
+          <td>{{ r.threshold }}</td>
+          <td>
+            {% if r.low %}<span class="pill warn">⚠️ {{ _("web.licenses.low.warn") }}</span>
+            {% else %}<span class="pill ok">{{ _("web.licenses.low.ok") }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
