@@ -24,6 +24,11 @@ redis==5.2.1
 # Telegram bot
 aiogram==3.15.0
 
+# HTTP client — imported at startup by the 3X-UI integration (app/xui/*), which
+# the web panel (app/web/views.py) and the bot (admin.xui handler) both load.
+# MUST stay a runtime dependency: the backend and bot fail to import without it.
+httpx==0.28.1
+
 # --- Retained for the dormant Phase 0 admin-panel templates (rebuilt in Phase 2) ---
 jinja2==3.1.5
 python-multipart==0.0.20

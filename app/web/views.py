@@ -282,6 +282,17 @@ async def logout():
     return resp
 
 
+@router.get("/admin")
+async def admin_alias():
+    """`/admin` is a convenience alias for the panel entry point.
+
+    The panel is served at `/` (which redirects to `/login` when signed out).
+    Some operators and older docs reach for `/admin`, so redirect there instead
+    of returning 404.
+    """
+    return RedirectResponse("/", status_code=302)
+
+
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,

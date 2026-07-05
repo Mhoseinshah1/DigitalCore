@@ -166,6 +166,18 @@ bash -n scripts/*.sh
 docker compose config
 ```
 
+Or run all of the above (plus an optional container startup check when Docker is
+available) with one command:
+
+```bash
+bash scripts/smoke_test.sh
+```
+
+> A regression test (`tests/test_foundation_install.py`) asserts that every
+> runtime import under `app/` is declared in `requirements.txt` — this guards
+> against a dependency being only in `requirements-dev.txt`, which would pass the
+> tests but crash the production container on startup.
+
 The background worker can be run directly:
 
 ```bash
@@ -244,8 +256,33 @@ cp .env.example .env
 The backend runs fine with `TELEGRAM_BOT_TOKEN` empty. The bot service logs a
 clear message and exits cleanly when the token is missing.
 
+The bot token and admin id accept either the canonical or the short name, so a
+fresh install never breaks over a variable-name choice:
+
+| Canonical (written by the installer) | Also accepted (alias) |
+|--------------------------------------|-----------------------|
+| `TELEGRAM_BOT_TOKEN`                  | `BOT_TOKEN`            |
+| `TELEGRAM_ADMIN_ID`                   | `MAIN_ADMIN_TELEGRAM_ID` |
+
+The canonical name wins if both are set.
+
 ## Troubleshooting
 
+- **First step for any broken install** — capture a full, secret-safe snapshot
+  (git commit, container status, which `.env` keys are set with values masked,
+  `/health` + `/ready` + `/admin` results, and recent backend/bot/worker logs):
+
+  ```bash
+  cd /opt/digitalcore && bash scripts/debug_status.sh
+  ```
+
+- **Panel / bot container exits immediately on a fresh install** — check the
+  logs (`docker compose logs backend`, `docker compose logs bot`). A
+  `ModuleNotFoundError` means a runtime import isn't declared in
+  `requirements.txt` (it must not live only in `requirements-dev.txt`). This is
+  guarded by `tests/test_foundation_install.py` and `scripts/smoke_test.sh`.
+- **Where is the panel?** — the admin panel is served at `/` (which redirects to
+  `/login` when signed out). `/admin` is accepted too and redirects to `/`.
 - **`scripts/install.sh: No such file or directory`** — run from the repository
   root after cloning: `cd digitalcore && sudo bash scripts/install.sh`. Make sure
   the clone completed and you are in the project directory.

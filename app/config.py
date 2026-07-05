@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,8 +58,20 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "change_me"
 
     # --- Telegram (optional) ---
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_ADMIN_ID: int | None = None
+    # Accept both the canonical names and the shorter aliases the installer/docs
+    # use, so a fresh install never fails just because of a variable-name choice:
+    #   TELEGRAM_BOT_TOKEN  <- BOT_TOKEN
+    #   TELEGRAM_ADMIN_ID   <- MAIN_ADMIN_TELEGRAM_ID
+    # The attribute names (settings.TELEGRAM_BOT_TOKEN / .TELEGRAM_ADMIN_ID) stay
+    # the same, so nothing downstream changes.
+    TELEGRAM_BOT_TOKEN: str = Field(
+        default="",
+        validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "BOT_TOKEN"),
+    )
+    TELEGRAM_ADMIN_ID: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TELEGRAM_ADMIN_ID", "MAIN_ADMIN_TELEGRAM_ID"),
+    )
 
     # --- Session cookie ---
     # "auto" (default): Secure only when the request actually arrived over HTTPS

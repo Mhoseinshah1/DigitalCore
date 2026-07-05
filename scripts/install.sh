@@ -50,6 +50,8 @@ on_error() {
     local code=$? line="${1:-?}" cmd="${2:-?}"
     printf '\n%s\n' "${RED}${BOLD}Installation FAILED (exit ${code}).${RESET}" >&2
     printf '%s\n' "${RED}  Failed at line ${line}: ${cmd}${RESET}" >&2
+    printf '%s\n' "  Working directory: $(pwd)" >&2
+    printf '%s\n' "  Git commit: $(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" >&2
     if [ -n "$COMPOSE" ] && [ -d "$INSTALL_DIR" ]; then
         warn "Container status (${COMPOSE} ps -a):"
         ( cd "$INSTALL_DIR" && $COMPOSE ps -a 2>/dev/null || true )
