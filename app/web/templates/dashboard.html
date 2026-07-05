@@ -1,31 +1,43 @@
 {% extends "base.html" %}
-{% block title %}{{ _("web.dash.title") }}{% endblock %}
+{% block title %}{{ _("dash.title") }}{% endblock %}
 {% block content %}
 <header class="page-head">
-  <h1>{{ _("web.dash.title") }}</h1>
-  <p class="muted">{{ _("web.dash.subtitle") }}</p>
+  <h1>{{ _("dash.title") }}</h1>
+  <p class="muted">{{ _("dash.subtitle", site=site_name) }}</p>
 </header>
 
-<section class="cards">
-  <div class="stat">
-    <div class="stat-num">{{ total }}</div>
-    <div class="stat-label">{{ _("web.dash.settings_label") }}</div>
-  </div>
-  {% for cat in categories %}
-  <a class="stat link" href="/settings#{{ cat.category }}">
-    <div class="stat-num">{{ cat.icon }}</div>
-    <div class="stat-label">{{ cat.title }}<span class="pill">{{ cat.count }}</span></div>
+<section class="stat-grid">
+  <a class="stat" href="/admin/users">
+    <div class="stat-num">{{ stats.total_users }}</div>
+    <div class="stat-label">👥 {{ _("dash.total_users") }}</div>
   </a>
-  {% endfor %}
+  <a class="stat" href="/admin/users/blocked">
+    <div class="stat-num">{{ stats.blocked_users }}</div>
+    <div class="stat-label">🚫 {{ _("dash.blocked_users") }}</div>
+  </a>
+  <div class="stat">
+    <div class="stat-num">{{ stats.verified_users }}</div>
+    <div class="stat-label">✅ {{ _("dash.verified_users") }}</div>
+  </div>
+  <a class="stat" href="/admin/products">
+    <div class="stat-num">{{ active_products }}</div>
+    <div class="stat-label">📦 {{ _("dash.active_products") }}</div>
+  </a>
 </section>
 
-<section class="note">
-  <h2>{{ _("web.dash.note_title") }}</h2>
-  <ul>
-    <li>{{ _("web.dash.note_item1") }}</li>
-    <li>{{ _("web.dash.note_item2") }}</li>
-    <li>{{ _("web.dash.note_item3") }}</li>
-  </ul>
-  <p class="muted">{{ _("web.dash.note_footer") }}</p>
+<section class="panel">
+  <h2>{{ _("dash.status_title") }}</h2>
+  <div class="status-rows">
+    <div class="status-row">
+      <span>🛠 {{ _("dash.maintenance") }}</span>
+      {% if maintenance %}<span class="pill warn">{{ _("dash.on") }}</span>
+      {% else %}<span class="pill ok">{{ _("dash.off") }}</span>{% endif %}
+    </div>
+    <div class="status-row">
+      <span>🛒 {{ _("dash.sales") }}</span>
+      {% if sales %}<span class="pill ok">{{ _("dash.on") }}</span>
+      {% else %}<span class="pill warn">{{ _("dash.off") }}</span>{% endif %}
+    </div>
+  </div>
 </section>
 {% endblock %}

@@ -9,7 +9,7 @@
 {% if error %}<div class="alert error">{{ _("web.products.not_saved", error=error) }}</div>{% endif %}
 
 <form method="post"
-      action="{% if product %}/products/{{ product.id }}/edit{% else %}/products/new{% endif %}"
+      action="{% if product %}/admin/products/{{ product.id }}/edit{% else %}/admin/products/create{% endif %}"
       class="settings-form">
   <section class="panel">
     <div class="fields">
@@ -86,7 +86,7 @@
 
   <div class="form-actions">
     <button type="submit" class="btn primary">{{ _("web.products.form.save") }}</button>
-    <a class="btn" href="/products">{{ _("web.products.form.cancel") }}</a>
+    <a class="btn" href="/admin/products">{{ _("web.products.form.cancel") }}</a>
   </div>
 </form>
 {% endblock %}

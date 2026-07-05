@@ -74,6 +74,8 @@ async def on_product_detail(
         )
     if product.description:
         lines.extend(["", product.description])
+    # Buying is not enabled yet (arrives in a later phase).
+    lines.extend(["", _("products.user.buy_soon")])
 
     if isinstance(callback.message, Message):
         await callback.message.answer("\n".join(lines), parse_mode="HTML")

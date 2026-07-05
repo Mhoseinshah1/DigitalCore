@@ -13,6 +13,7 @@ Guarantees provided by this service:
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select
@@ -115,6 +116,15 @@ class SettingsService:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    async def get_decimal(self, key: str, default: Decimal | int | str = 0) -> Decimal:
+        value = await self.get(key, None)
+        if value is None or value == "":
+            return Decimal(str(default))
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal(str(default))
 
     async def all_rows(self) -> list[Setting]:
         result = await self.session.execute(select(Setting))

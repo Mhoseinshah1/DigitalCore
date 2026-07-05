@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -21,8 +21,22 @@ class User(Base, TimestampMixin):
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Raw Telegram language_code (e.g. "en", "fa", "ru"); distinct from the UI
+    # `language` preference below.
+    language_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Wallet balance in integer toman (the platform's money convention). A
+    # dedicated wallet_transactions row records every change; no purchase logic
+    # in this phase.
+    wallet_balance: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False
+    )
+
+    # Free-text note visible only to admins.
+    admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # UI language (fa/en); fa is the platform default.
     language: Mapped[str] = mapped_column(

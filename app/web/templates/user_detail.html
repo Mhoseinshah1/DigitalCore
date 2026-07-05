@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ _("user.title") }} #{{ user.id }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("user.title") }} #{{ user.id }}</h1>
+  <p class="muted"><a href="/admin/users">← {{ _("users.title") }}</a></p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("user.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<div class="detail-grid">
+  <section class="panel">
+    <h2>{{ _("user.profile") }}</h2>
+    <table class="kv">
+      <tr><th>{{ _("users.col.telegram") }}</th><td>{{ summary.telegram_id or "—" }}</td></tr>
+      <tr><th>{{ _("users.col.username") }}</th><td>{% if summary.username %}@{{ summary.username }}{% else %}—{% endif %}</td></tr>
+      <tr><th>{{ _("users.col.name") }}</th><td>{{ summary.full_name or "—" }}</td></tr>
+      <tr><th>{{ _("users.col.phone") }}</th><td>{{ summary.phone_number or "—" }}</td></tr>
+      <tr><th>{{ _("user.language") }}</th><td>{{ summary.language }}{% if summary.language_code %} ({{ summary.language_code }}){% endif %}</td></tr>
+      <tr><th>{{ _("users.col.created") }}</th><td>{{ summary.created_at.strftime("%Y-%m-%d %H:%M") if summary.created_at else "—" }}</td></tr>
+      <tr><th>{{ _("users.col.activity") }}</th><td>{{ summary.last_activity_at.strftime("%Y-%m-%d %H:%M") if summary.last_activity_at else "—" }}</td></tr>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>{{ _("user.status") }}</h2>
+    <p>
+      {% if summary.is_blocked %}<span class="pill warn">{{ _("users.status.blocked") }}</span>
+      {% else %}<span class="pill ok">{{ _("users.status.active") }}</span>{% endif %}
+      {% if summary.is_verified %}<span class="pill ok">{{ _("user.verified") }}</span>
+      {% else %}<span class="pill">{{ _("user.unverified") }}</span>{% endif %}
+    </p>
+    <p class="wallet-big">💰 {{ "{:,}".format(summary.wallet_balance) }} <span class="muted">{{ _("user.toman") }}</span></p>
+
+    {% if can_manage_users %}
+    <div class="action-row">
+      {% if summary.is_blocked %}
+      <form method="post" action="/admin/users/{{ user.id }}/unblock">
+        <button type="submit" class="btn">{{ _("user.unblock") }}</button>
+      </form>
+      {% else %}
+      <form method="post" action="/admin/users/{{ user.id }}/block">
+        <button type="submit" class="btn danger">{{ _("user.block") }}</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/admin/users/{{ user.id }}/verify">
+        <input type="hidden" name="verified" value="{{ 0 if summary.is_verified else 1 }}">
+        <button type="submit" class="btn">{% if summary.is_verified %}{{ _("user.unverify") }}{% else %}{{ _("user.verify") }}{% endif %}</button>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+{% if can_adjust_wallet %}
+<section class="panel">
+  <h2>{{ _("user.wallet") }}</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/wallet-adjust" class="inline-form">
+    <select name="direction">
+      <option value="add">{{ _("user.wallet_add") }}</option>
+      <option value="subtract">{{ _("user.wallet_subtract") }}</option>
+    </select>
+    <input type="number" name="amount" min="1" placeholder="{{ _('user.wallet_amount') }}" required>
+    <input type="text" name="reason" placeholder="{{ _('user.wallet_reason') }}">
+    <button type="submit" class="btn primary">{{ _("user.wallet_apply") }}</button>
+  </form>
+</section>
+{% endif %}
+
+{% if can_manage_users %}
+<section class="panel">
+  <h2>{{ _("user.note") }}</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/note" class="settings-form">
+    <textarea name="admin_note" rows="3">{{ summary.admin_note or "" }}</textarea>
+    <div class="form-actions"><button type="submit" class="btn">{{ _("user.note_save") }}</button></div>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>{{ _("user.tx_history") }}</h2>
+  {% if not txns %}
+  <p class="muted">{{ _("wallet.empty") }}</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>{{ _("wallet.col.time") }}</th><th>{{ _("wallet.col.amount") }}</th><th>{{ _("wallet.col.balance") }}</th><th>{{ _("wallet.col.reason") }}</th></tr></thead>
+      <tbody>
+        {% for tx in txns %}
+        <tr>
+          <td class="muted">{{ tx.created_at.strftime("%Y-%m-%d %H:%M") if tx.created_at else "—" }}</td>
+          <td class="{{ 'pos' if tx.amount >= 0 else 'neg' }}">{{ "{:+,}".format(tx.amount) }}</td>
+          <td>{{ "{:,}".format(tx.balance_after) }}</td>
+          <td class="muted">{{ tx.reason or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel muted-panel">
+  <h2>{{ _("user.future.title") }}</h2>
+  <p class="muted">{{ _("user.future.orders") }} · {{ _("user.future.licenses") }} · {{ _("user.future.services") }} · {{ _("user.future.payments") }} · {{ _("user.future.tickets") }} — <em>{{ _("web.placeholder.body") }}</em></p>
+</section>
+{% endblock %}

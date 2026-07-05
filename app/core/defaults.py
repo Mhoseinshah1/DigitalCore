@@ -1,20 +1,16 @@
-"""Canonical catalog of business settings.
+"""Canonical catalog of business settings (Phase 2).
 
-This is the single source of truth for every business setting the platform
-understands. On first boot the seeder inserts one row per entry with an
-empty/default value; the admin panel (web + Telegram) edits them afterwards.
+Single source of truth for every business setting. Each entry declares its
+category, value type, default, and bilingual label/description. The settings
+service (app/core/settings_service.py) stores only (key, value, is_secret); this
+catalog supplies the display/type metadata by key.
 
-The keys the installer/settings policy explicitly requires to exist as default
-records are all present here:
+Categories map 1:1 to the four settings pages:
+    general · telegram · payment · texts (bot messages)
 
-    card_number, sheba, card_owner, payment_text, log_group_id,
-    force_join_channel, start_text, rules_text, support_text,
-    sales_enabled, wallet_enabled, maintenance_mode
-
-Labels/descriptions are bilingual (English + Persian); render via label_for /
-description_for with the viewer's language. Categories map 1:1 to the sections
-of the settings pages. `env_var` lets an operator pre-seed an initial value
-from the environment; the installer leaves those empty.
+Seeding (app/seed.py) inserts one row per entry with its default, never
+overwriting an existing custom value. `env_var` lets an operator pre-seed an
+initial value from the environment; the installer leaves those empty.
 """
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ from dataclasses import dataclass
 class SettingDef:
     key: str
     category: str
-    value_type: str = "string"  # string | text | bool | int | secret
+    value_type: str = "string"  # string | text | bool | int
     default: str = ""
     is_secret: bool = False
     label: str = ""
@@ -50,12 +46,18 @@ def description_for(d: SettingDef, lang: str) -> str:
 
 # Panel section metadata (title + order) keyed by category.
 CATEGORIES: dict[str, dict[str, object]] = {
-    "payment": {"title": "Payment", "title_fa": "پرداخت", "order": 1, "icon": "💳"},
+    "general": {"title": "General", "title_fa": "عمومی", "order": 1, "icon": "⚙️"},
     "telegram": {"title": "Telegram", "title_fa": "تلگرام", "order": 2, "icon": "✈️"},
-    "texts": {"title": "Bot texts", "title_fa": "متن‌های ربات", "order": 3, "icon": "📝"},
-    "business": {"title": "Business", "title_fa": "کسب‌وکار", "order": 4, "icon": "⚙️"},
-    "v2ray": {"title": "V2Ray", "title_fa": "V2Ray", "order": 5, "icon": "🌐"},
-    "license": {"title": "License", "title_fa": "لایسنس", "order": 6, "icon": "🔑"},
+    "payment": {"title": "Payment", "title_fa": "پرداخت", "order": 3, "icon": "💳"},
+    "texts": {"title": "Bot messages", "title_fa": "پیام‌های ربات", "order": 4, "icon": "📝"},
+}
+
+# Which settings page (URL slug) renders each category.
+CATEGORY_PAGE: dict[str, str] = {
+    "general": "general",
+    "telegram": "telegram",
+    "payment": "payment",
+    "texts": "bot-texts",
 }
 
 
@@ -67,67 +69,110 @@ def category_title_for(category: str, lang: str) -> str:
 
 
 DEFAULTS: list[SettingDef] = [
-    # ---------------- Payment ----------------
-    SettingDef("card_number", "payment", "string",
-               label="Card number", env_var="DEFAULT_CARD_NUMBER",
-               description="Destination card number for card-to-card payments.",
-               label_fa="شماره کارت",
-               description_fa="شماره کارت مقصد برای پرداخت کارت‌به‌کارت."),
-    SettingDef("sheba", "payment", "string",
-               label="SHEBA / IBAN", env_var="DEFAULT_SHEBA",
-               description="Destination SHEBA (IBAN) number.",
-               label_fa="شماره شبا",
-               description_fa="شماره شبا (IBAN) مقصد."),
-    SettingDef("card_owner", "payment", "string",
-               label="Card owner name", env_var="DEFAULT_CARD_OWNER",
-               description="Full name of the card/account owner.",
-               label_fa="نام صاحب کارت",
-               description_fa="نام کامل صاحب کارت/حساب."),
-    SettingDef("payment_text", "payment", "text",
-               label="Payment instructions",
-               description="Instructions shown to the user when paying.",
-               label_fa="متن راهنمای پرداخت",
-               description_fa="راهنمایی که هنگام پرداخت به کاربر نمایش داده می‌شود."),
+    # ---------------- General ----------------
+    SettingDef("site_name", "general", "string", default="DigitalCore",
+               label="Site name",
+               description="Displayed name of the platform.",
+               label_fa="نام سایت",
+               description_fa="نام نمایشی پلتفرم."),
+    SettingDef("maintenance_mode", "general", "bool", default="false",
+               env_var="MAINTENANCE_MODE",
+               label="Maintenance mode",
+               description="When on, normal users see a maintenance notice; admins still get through.",
+               label_fa="حالت تعمیر و نگهداری",
+               description_fa="در حالت روشن، کاربران عادی پیام تعمیر می‌بینند؛ ادمین‌ها همچنان دسترسی دارند."),
+    SettingDef("sales_enabled", "general", "bool", default="true",
+               label="Sales enabled",
+               description="Master switch for selling products.",
+               label_fa="فعال‌بودن فروش",
+               description_fa="کلید اصلی فروش محصولات."),
+    SettingDef("support_enabled", "general", "bool", default="true",
+               label="Support enabled",
+               description="Show the support option to users.",
+               label_fa="فعال‌بودن پشتیبانی",
+               description_fa="نمایش گزینه پشتیبانی به کاربران."),
 
     # ---------------- Telegram ----------------
-    SettingDef("log_group_id", "telegram", "string",
-               label="Log group / channel ID", env_var="LOG_GROUP_ID",
+    SettingDef("log_group_id", "telegram", "string", env_var="LOG_GROUP_ID",
+               label="Log group / channel ID",
                description="Chat ID where the bot posts logs and receipts.",
                label_fa="شناسه گروه/کانال لاگ",
                description_fa="شناسه چتی که ربات لاگ‌ها و رسیدها را در آن ارسال می‌کند."),
-    SettingDef("force_join_channel", "telegram", "string",
-               label="Force-join channel", env_var="FORCE_JOIN_CHANNEL",
+    SettingDef("force_join_channel", "telegram", "string", env_var="FORCE_JOIN_CHANNEL",
+               label="Force-join channel",
                description="@channel users must join before using the bot.",
                label_fa="کانال عضویت اجباری",
                description_fa="@کانالی که کاربران باید پیش از استفاده از ربات عضو آن شوند."),
-    SettingDef("support_admin_username", "telegram", "string",
-               label="Support admin username",
+    SettingDef("support_username", "telegram", "string",
+               label="Support username",
                description="@username users are directed to for support.",
                label_fa="نام کاربری پشتیبانی",
                description_fa="@نام‌کاربری که کاربران برای پشتیبانی به آن ارجاع می‌شوند."),
-    SettingDef("broadcast_enabled", "telegram", "bool", default="true",
-               label="Enable broadcasts",
-               description="Allow the owner to broadcast messages to users.",
-               label_fa="فعال‌سازی اطلاع‌رسانی",
-               description_fa="اجازه ارسال پیام همگانی به کاربران."),
 
-    # ---------------- Bot texts ----------------
+    # ---------------- Payment ----------------
+    SettingDef("card_number", "payment", "string", env_var="DEFAULT_CARD_NUMBER",
+               label="Card number",
+               description="Destination card number for card-to-card payments.",
+               label_fa="شماره کارت",
+               description_fa="شماره کارت مقصد برای پرداخت کارت‌به‌کارت."),
+    SettingDef("card_owner", "payment", "string", env_var="DEFAULT_CARD_OWNER",
+               label="Card owner name",
+               description="Full name of the card/account owner.",
+               label_fa="نام صاحب کارت",
+               description_fa="نام کامل صاحب کارت/حساب."),
+    SettingDef("sheba_number", "payment", "string", env_var="DEFAULT_SHEBA",
+               label="SHEBA / IBAN",
+               description="Destination SHEBA (IBAN) number.",
+               label_fa="شماره شبا",
+               description_fa="شماره شبا (IBAN) مقصد."),
+    SettingDef("payment_instructions", "payment", "text",
+               label="Payment instructions",
+               description="Instructions shown to the user when paying by card.",
+               label_fa="راهنمای پرداخت",
+               description_fa="راهنمایی که هنگام پرداخت کارت‌به‌کارت به کاربر نمایش داده می‌شود."),
+    SettingDef("min_wallet_topup", "payment", "int", default="0",
+               label="Minimum wallet top-up",
+               description="Smallest allowed wallet top-up amount (toman).",
+               label_fa="حداقل شارژ کیف پول",
+               description_fa="کمترین مبلغ مجاز برای شارژ کیف پول (تومان)."),
+    SettingDef("wallet_enabled", "payment", "bool", default="true",
+               label="Wallet enabled",
+               description="Allow users to keep a wallet balance.",
+               label_fa="فعال‌بودن کیف پول",
+               description_fa="اجازه نگهداری موجودی کیف پول برای کاربران."),
+    SettingDef("card_to_card_enabled", "payment", "bool", default="true",
+               label="Card-to-card enabled",
+               description="Allow manual card-to-card payments.",
+               label_fa="فعال‌بودن کارت‌به‌کارت",
+               description_fa="اجازه پرداخت دستی کارت‌به‌کارت."),
+
+    # ---------------- Bot messages ----------------
     SettingDef("start_text", "texts", "text",
                label="Start message",
                description="Shown on /start.",
                label_fa="پیام شروع",
                description_fa="هنگام /start نمایش داده می‌شود."),
     SettingDef("rules_text", "texts", "text",
-               label="Rules text",
+               label="Rules message",
                description="Rules / terms shown to users.",
-               label_fa="متن قوانین",
+               label_fa="پیام قوانین",
                description_fa="قوانین/شرایطی که به کاربران نمایش داده می‌شود."),
-    SettingDef("support_text", "texts", "text",
-               label="Support message",
-               description="Shown when the user asks for support.",
-               label_fa="پیام پشتیبانی",
-               description_fa="هنگام درخواست پشتیبانی نمایش داده می‌شود."),
-    SettingDef("success_purchase_text", "texts", "text",
+    SettingDef("blocked_user_text", "texts", "text",
+               label="Blocked-user message",
+               description="Shown to a blocked user instead of the normal menu.",
+               label_fa="پیام کاربر مسدود",
+               description_fa="به‌جای منوی عادی به کاربر مسدودشده نمایش داده می‌شود."),
+    SettingDef("maintenance_text", "texts", "text",
+               label="Maintenance message",
+               description="Shown to normal users while maintenance mode is on.",
+               label_fa="پیام حالت تعمیر",
+               description_fa="در حالت تعمیر و نگهداری به کاربران عادی نمایش داده می‌شود."),
+    SettingDef("payment_text", "texts", "text",
+               label="Payment message",
+               description="Bot message shown when the user starts a payment.",
+               label_fa="پیام پرداخت",
+               description_fa="پیام رباتی که هنگام شروع پرداخت نمایش داده می‌شود."),
+    SettingDef("successful_purchase_text", "texts", "text",
                label="Successful purchase message",
                description="Sent after a purchase is approved.",
                label_fa="پیام خرید موفق",
@@ -137,61 +182,18 @@ DEFAULTS: list[SettingDef] = [
                description="Sent when a payment is rejected.",
                label_fa="پیام رد پرداخت",
                description_fa="هنگام رد شدن پرداخت ارسال می‌شود."),
-    SettingDef("expiration_warning_text", "texts", "text",
-               label="Expiration warning",
-               description="Sent before a subscription expires.",
-               label_fa="هشدار انقضا",
-               description_fa="پیش از پایان اشتراک ارسال می‌شود."),
-
-    # ---------------- Business ----------------
-    SettingDef("sales_enabled", "business", "bool", default="true",
-               label="Enable sales",
-               description="Master switch for selling products.",
-               label_fa="فعال‌سازی فروش",
-               description_fa="کلید اصلی فروش محصولات."),
-    SettingDef("card_payment_enabled", "business", "bool", default="true",
-               label="Enable card-to-card payment",
-               description="Allow manual card-to-card payments.",
-               label_fa="فعال‌سازی کارت‌به‌کارت",
-               description_fa="اجازه پرداخت دستی کارت‌به‌کارت."),
-    SettingDef("wallet_enabled", "business", "bool", default="true",
-               label="Enable wallet",
-               description="Allow users to keep a wallet balance.",
-               label_fa="فعال‌سازی کیف پول",
-               description_fa="اجازه نگهداری موجودی کیف پول برای کاربران."),
-    SettingDef("free_test_enabled", "business", "bool", default="false",
-               label="Enable free test",
-               description="Offer a free trial account.",
-               label_fa="فعال‌سازی تست رایگان",
-               description_fa="ارائه اکانت آزمایشی رایگان."),
-    SettingDef("min_wallet_topup", "business", "int", default="0",
-               label="Minimum wallet top-up",
-               description="Smallest allowed wallet top-up amount.",
-               label_fa="حداقل شارژ کیف پول",
-               description_fa="کمترین مبلغ مجاز برای شارژ کیف پول."),
-    SettingDef("maintenance_mode", "business", "bool", default="false",
-               label="Maintenance mode", env_var="MAINTENANCE_MODE",
-               description="Show a maintenance notice in the bot and panel.",
-               label_fa="حالت تعمیر و نگهداری",
-               description_fa="نمایش اعلان به‌روزرسانی در ربات و پنل."),
-
-    # ---------------- V2Ray ----------------
-    # 3X-UI server records and inbound sync are managed as dedicated resources in
-    # a later phase; the selectable default inbound is stored here.
-    SettingDef("default_inbound_id", "v2ray", "string",
-               label="Default inbound for products",
-               description="Inbound selected for newly created V2Ray products.",
-               label_fa="اینباند پیش‌فرض محصولات",
-               description_fa="اینباندی که برای محصولات جدید V2Ray انتخاب می‌شود."),
-
-    # ---------------- License ----------------
-    SettingDef("low_stock_threshold", "license", "int", default="5",
-               label="Low-stock alert threshold",
-               description="Alert the owner when license stock drops below this.",
-               label_fa="آستانه هشدار کمبود موجودی",
-               description_fa="وقتی موجودی لایسنس از این مقدار کمتر شود به مالک هشدار داده می‌شود."),
+    SettingDef("support_text", "texts", "text",
+               label="Support message",
+               description="Shown when the user asks for support.",
+               label_fa="پیام پشتیبانی",
+               description_fa="هنگام درخواست پشتیبانی نمایش داده می‌شود."),
 ]
 
 
 # Fast lookup by key.
 DEFAULTS_BY_KEY: dict[str, SettingDef] = {d.key: d for d in DEFAULTS}
+
+
+def keys_for_category(category: str) -> list[SettingDef]:
+    """Catalog entries in a category, in declaration order."""
+    return [d for d in DEFAULTS if d.category == category]

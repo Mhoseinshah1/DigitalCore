@@ -8,7 +8,7 @@
 
 {% if error %}<div class="alert error">{{ _("web.servers.not_saved", error=error) }}</div>{% endif %}
 
-<form method="post" action="/servers/new" class="settings-form">
+<form method="post" action="/admin/servers/new" class="settings-form">
   <section class="panel">
     <div class="fields">
       <div class="field">
@@ -49,7 +49,7 @@
 
   <div class="form-actions">
     <button type="submit" class="btn primary">{{ _("web.servers.form.save") }}</button>
-    <a class="btn" href="/servers">{{ _("web.servers.form.cancel") }}</a>
+    <a class="btn" href="/admin/servers">{{ _("web.servers.form.cancel") }}</a>
   </div>
 </form>
 {% endblock %}

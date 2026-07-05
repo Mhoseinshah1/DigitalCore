@@ -53,7 +53,7 @@ async def client_with_role() -> AsyncIterator[ClientFactory]:
         client = httpx.AsyncClient(transport=transport, base_url="http://testserver")
         clients.append(client)
         r = await client.post(
-            "/login",
+            "/admin/login",
             data={"username": username, "password": PASSWORD},
             follow_redirects=False,
         )
@@ -80,27 +80,27 @@ VALID_FORM = {
 
 async def test_viewer_cannot_view_or_create_servers(client_with_role) -> None:
     client = await client_with_role("viewer")
-    r = await client.get("/servers")
+    r = await client.get("/admin/servers")
     assert r.status_code == 403
-    r = await client.post("/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
     assert r.status_code == 403
 
 
 async def test_accountant_cannot_manage_servers(client_with_role) -> None:
     client = await client_with_role("accountant")
-    r = await client.post("/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
     assert r.status_code == 403
 
 
 async def test_admin_can_create_and_list_servers(client_with_role) -> None:
     client = await client_with_role("admin")
-    r = await client.get("/servers")
+    r = await client.get("/admin/servers")
     assert r.status_code == 200
 
-    r = await client.post("/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
 
-    r = await client.get("/servers")
+    r = await client.get("/admin/servers")
     assert "RBAC Server" in r.text
     # The chosen panel version is rendered verbatim (language-independent).
     assert "2.9.4" in r.text

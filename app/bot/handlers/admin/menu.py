@@ -7,6 +7,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from app.bot.handlers.admin.panel import build_overview
 from app.bot.keyboards.admin import admin_main_menu
 from app.bot.keyboards.user import user_main_menu
 from app.core.permissions import Role, has_permission
@@ -23,8 +24,10 @@ async def on_admin_menu(
     if role is None or not has_permission(role, "view_dashboard"):
         await message.answer(_("admin.not_authorized"))
         return
+    header = _("admin.panel_title", role=role.value)
+    overview = await build_overview(lang, _)
     await message.answer(
-        _("admin.panel_title", role=role.value), reply_markup=admin_main_menu(lang)
+        f"{header}\n\n{overview}", reply_markup=admin_main_menu(lang), parse_mode="HTML"
     )
 
 

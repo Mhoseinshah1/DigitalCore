@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ title }}</h1>
+  <p class="muted">{{ _("settings.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("settings.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("settings.not_saved", error=error) }}</div>{% endif %}
+{% if not can_edit %}<div class="alert">{{ _("settings.readonly") }}</div>{% endif %}
+
+<form method="post" action="/admin/settings/{{ page }}" class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      {% for f in items %}
+      <div class="field field-{{ f.value_type }}" id="{{ f.key }}">
+        {% if f.value_type == 'bool' %}
+        <label class="switch">
+          <input type="checkbox" name="{{ f.key }}" {% if f.value %}checked{% endif %} {% if not can_edit %}disabled{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ f.label }}</span>
+        </label>
+        {% else %}
+        <label for="f-{{ f.key }}">{{ f.label }}</label>
+        {% if f.is_secret %}
+        <input id="f-{{ f.key }}" name="{{ f.key }}" type="password" value="" autocomplete="off"
+               placeholder="{% if f.has_secret %}{{ _('settings.secret_keep') }}{% else %}{{ f.description }}{% endif %}" {% if not can_edit %}disabled{% endif %}>
+        {% elif f.value_type == 'text' %}
+        <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="3" placeholder="{{ f.description }}" {% if not can_edit %}disabled{% endif %}>{{ f.value }}</textarea>
+        {% elif f.value_type == 'int' %}
+        <input id="f-{{ f.key }}" name="{{ f.key }}" type="number" value="{{ f.value }}" inputmode="numeric" {% if not can_edit %}disabled{% endif %}>
+        {% else %}
+        <input id="f-{{ f.key }}" name="{{ f.key }}" type="text" value="{{ f.value }}" placeholder="{{ f.description }}" {% if not can_edit %}disabled{% endif %}>
+        {% endif %}
+        {% endif %}
+        {% if f.description and f.value_type != 'bool' %}
+        <small class="hint">{{ f.description }}</small>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if can_edit %}
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("settings.save") }}</button>
+  </div>
+  {% endif %}
+</form>
+{% endblock %}

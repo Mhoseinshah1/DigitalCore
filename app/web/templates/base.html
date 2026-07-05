@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}DigitalCore{% endblock %} · DigitalCore</title>
+  <title>{% block title %}{{ _("nav.dashboard") }}{% endblock %} · DigitalCore</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -15,7 +15,7 @@
     <nav class="nav-tree">
       {% for sec in nav %}
         {% if sec.children %}
-        <details class="nav-group{% if sec.active %} active{% endif %}" open>
+        <details class="nav-group{% if sec.active %} active{% endif %}"{% if sec.active %} open{% endif %}>
           <summary class="nav-group-head">
             <span class="nav-ico">{{ sec.icon }}</span>
             <span class="nav-group-label">{{ sec.label }}</span>
@@ -51,12 +51,12 @@
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
         <div class="lang-switch">
-          <a href="/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
+          <a href="/admin/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
           <span>·</span>
-          <a href="/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
+          <a href="/admin/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
         </div>
         <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · {{ _("web.owner_badge") }}{% endif %}</div>
-        <a class="btn small logout-btn" href="/logout">{{ _("web.logout") }}</a>
+        <a class="btn small logout-btn" href="/admin/logout">{{ _("web.logout") }}</a>
       </div>
     </header>
     <main class="content">

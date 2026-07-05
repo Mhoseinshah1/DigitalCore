@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{% if blocked_only %}{{ _("users.blocked_title") }}{% else %}{{ _("users.title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if blocked_only %}{{ _("users.blocked_title") }}{% else %}{{ _("users.title") }}{% endif %}</h1>
+  <p class="muted">{{ _("users.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("user.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if not blocked_only %}
+<form class="toolbar" method="get" action="/admin/users">
+  <input type="text" name="q" value="{{ q }}" placeholder="{{ _('users.search_ph') }}">
+  <button type="submit" class="btn">{{ _("users.search_btn") }}</button>
+</form>
+{% endif %}
+
+{% if not users %}
+<section class="note"><p class="muted">{{ _("users.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("users.col.id") }}</th>
+          <th>{{ _("users.col.telegram") }}</th>
+          <th>{{ _("users.col.username") }}</th>
+          <th>{{ _("users.col.name") }}</th>
+          <th>{{ _("users.col.wallet") }}</th>
+          <th>{{ _("users.col.status") }}</th>
+          <th>{{ _("users.col.created") }}</th>
+          <th>{{ _("users.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.id }}</td>
+          <td class="muted">{{ u.telegram_id or "—" }}</td>
+          <td>{% if u.username %}@{{ u.username }}{% else %}—{% endif %}</td>
+          <td>{{ (u.first_name ~ " " ~ (u.last_name or "")).strip() or "—" }}</td>
+          <td>{{ "{:,}".format(u.wallet_balance or 0) }}</td>
+          <td>
+            {% if u.is_blocked %}<span class="pill warn">{{ _("users.status.blocked") }}</span>
+            {% else %}<span class="pill ok">{{ _("users.status.active") }}</span>{% endif %}
+            {% if u.is_verified %}<span class="pill">✅</span>{% endif %}
+          </td>
+          <td class="muted">{{ u.created_at.strftime("%Y-%m-%d") if u.created_at else "—" }}</td>
+          <td class="actions">
+            <a class="btn small" href="/admin/users/{{ u.id }}">{{ _("users.view") }}</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

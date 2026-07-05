@@ -18,7 +18,7 @@ from app.core.redis import redis_ok
 from app.database import database_ok
 from app.web.api import auth as auth_api
 from app.web.api import settings as settings_api
-from app.web.views import router as views_router
+from app.web.views import root_router, router as views_router
 
 configure_logging()
 log = logging.getLogger("backend")
@@ -34,6 +34,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth_api.router)
 app.include_router(settings_api.router)
 app.include_router(views_router)
+app.include_router(root_router)
 
 
 @app.get("/health", tags=["meta"])

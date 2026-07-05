@@ -9,7 +9,7 @@
 {% if saved %}<div class="alert ok">{{ _("web.products.saved") }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ _("web.products.not_saved", error=error) }}</div>{% endif %}
 
-<p><a class="btn primary" href="/products/new">➕ {{ _("web.products.add") }}</a></p>
+<p><a class="btn primary" href="/admin/products/create">➕ {{ _("web.products.add") }}</a></p>
 
 {% if not products %}
 <section class="note"><p class="muted">{{ _("web.products.empty") }}</p></section>
@@ -47,11 +47,11 @@
             {% else %}<span class="pill ok">{{ _("product.state.active") }}</span>{% endif %}
           </td>
           <td class="actions">
-            <a class="btn small" href="/products/{{ p.id }}/edit">{{ _("web.products.edit") }}</a>
-            <form method="post" action="/products/{{ p.id }}/toggle-active">
+            <a class="btn small" href="/admin/products/{{ p.id }}/edit">{{ _("web.products.edit") }}</a>
+            <form method="post" action="/admin/products/{{ p.id }}/toggle-active">
               <button type="submit" class="btn small" title="{{ _('web.products.toggle_active') }}">🔁</button>
             </form>
-            <form method="post" action="/products/{{ p.id }}/toggle-hidden">
+            <form method="post" action="/admin/products/{{ p.id }}/delete-or-hide">
               <button type="submit" class="btn small" title="{{ _('web.products.toggle_hidden') }}">👁</button>
             </form>
           </td>

@@ -242,3 +242,42 @@ select:focus { border-color: var(--accent); }
   .topbar { padding: .6rem 1rem; }
   .topbar .who { display: none; }
 }
+
+/* ===================== Phase 2 admin components ===================== */
+/* Stat grid (dashboard) */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.stat-grid .stat { display: block; }
+a.stat:hover { border-color: var(--accent); text-decoration: none; }
+
+/* Pills / badges */
+.pill.warn { border-color: var(--err); color: #ffc6cc; }
+
+/* Status rows */
+.status-rows { display: flex; flex-direction: column; gap: .6rem; }
+.status-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 340px; }
+
+/* Toolbar (search) */
+.toolbar { display: flex; gap: .5rem; margin-bottom: 1rem; max-width: 520px; }
+.toolbar input { flex: 1; }
+
+/* Detail grid (user detail) */
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem; }
+
+/* Key/value table */
+table.kv { width: 100%; border-collapse: collapse; }
+table.kv th { text-align: start; color: var(--muted); font-weight: 600; padding: .35rem .6rem .35rem 0; white-space: nowrap; vertical-align: top; }
+table.kv td { padding: .35rem 0; }
+
+/* Action rows / inline forms */
+.action-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+.action-row form { display: inline; }
+.inline-form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.inline-form input[type="number"] { max-width: 160px; }
+.inline-form select { max-width: 140px; }
+
+/* Wallet display */
+.wallet-big { font-size: 1.4rem; font-weight: 700; margin: .5rem 0; }
+.data-table td.pos { color: #b6f0cf; }
+.data-table td.neg { color: #ffc6cc; }
+
+.muted-panel { opacity: .85; }

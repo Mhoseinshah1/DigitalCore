@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ _("audit.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("audit.title") }}{% if scope == 'admin' %} · {{ _("nav.logs.admin") }}{% endif %}</h1>
+  <p class="muted">{{ _("audit.subtitle") }}</p>
+</header>
+
+{% if not logs %}
+<section class="note"><p class="muted">{{ _("audit.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("audit.col.time") }}</th>
+          <th>{{ _("audit.col.actor") }}</th>
+          <th>{{ _("audit.col.action") }}</th>
+          <th>{{ _("audit.col.target") }}</th>
+          <th>{{ _("audit.col.detail") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in logs %}
+        <tr>
+          <td class="muted">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "—" }}</td>
+          <td>{{ r.actor_type }}{% if r.actor_id %} #{{ r.actor_id }}{% endif %}</td>
+          <td><code>{{ r.action }}</code></td>
+          <td class="muted">{% if r.target_type %}{{ r.target_type }}{% if r.target_id %}:{{ r.target_id }}{% endif %}{% else %}—{% endif %}</td>
+          <td class="muted small">
+            {% if r.old_value or r.new_value %}{{ (r.old_value or "∅") }} → {{ (r.new_value or "∅") }}{% endif %}
+            {% if r.meta %} · {{ r.meta }}{% endif %}
+            {% if r.ip_address %} · {{ r.ip_address }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

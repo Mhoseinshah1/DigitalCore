@@ -27,6 +27,11 @@ class AuditLog(Base):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional structured context (JSON/text) and the source IP for web actions.
+    # Attribute name `meta` because `metadata` is reserved on the declarative base.
+    meta: Mapped[str | None] = mapped_column("meta", Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

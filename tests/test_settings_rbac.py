@@ -1,4 +1,9 @@
-"""Web settings RBAC: only manage_settings roles (owner/admin) may view/save."""
+"""Web settings RBAC (Phase 2).
+
+manage_settings gates general/telegram/bot-texts; payment is view_payments to
+view and manage_payments to save. Accountant can view payment settings but not
+change them.
+"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -20,7 +25,6 @@ ClientFactory = Callable[[str], Awaitable[httpx.AsyncClient]]
 
 @pytest_asyncio.fixture
 async def client_with_role() -> AsyncIterator[ClientFactory]:
-    """Factory: build a logged-in client whose admin has the given role."""
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         poolclass=StaticPool,
@@ -54,7 +58,7 @@ async def client_with_role() -> AsyncIterator[ClientFactory]:
         client = httpx.AsyncClient(transport=transport, base_url="http://testserver")
         clients.append(client)
         r = await client.post(
-            "/login",
+            "/admin/login",
             data={"username": username, "password": PASSWORD},
             follow_redirects=False,
         )
@@ -72,9 +76,11 @@ async def client_with_role() -> AsyncIterator[ClientFactory]:
 
 async def test_viewer_cannot_view_or_save_settings(client_with_role) -> None:
     client = await client_with_role("viewer")
-    r = await client.get("/settings")
+    r = await client.get("/admin/settings/general")
     assert r.status_code == 403
-    r = await client.post("/settings", data={"card_number": "1111"}, follow_redirects=False)
+    r = await client.post(
+        "/admin/settings/payment", data={"card_number": "1111"}, follow_redirects=False
+    )
     assert r.status_code == 403
     r = await client.put("/api/settings", json={"values": {"card_number": "1111"}})
     assert r.status_code == 403
@@ -82,16 +88,33 @@ async def test_viewer_cannot_view_or_save_settings(client_with_role) -> None:
 
 async def test_support_cannot_save_settings(client_with_role) -> None:
     client = await client_with_role("support")
-    r = await client.post("/settings", data={"card_number": "2222"}, follow_redirects=False)
+    r = await client.post(
+        "/admin/settings/general", data={"site_name": "X"}, follow_redirects=False
+    )
+    assert r.status_code == 403
+
+
+async def test_accountant_can_view_but_not_save_payment(client_with_role) -> None:
+    client = await client_with_role("accountant")
+    # view_payments lets an accountant open the payment page...
+    r = await client.get("/admin/settings/payment")
+    assert r.status_code == 200
+    # ...but manage_payments is required to save it.
+    r = await client.post(
+        "/admin/settings/payment", data={"card_number": "9999"}, follow_redirects=False
+    )
+    assert r.status_code == 403
+    # And they can't open the general (manage_settings) page.
+    r = await client.get("/admin/settings/general")
     assert r.status_code == 403
 
 
 async def test_admin_can_view_and_save_settings(client_with_role) -> None:
     client = await client_with_role("admin")
-    r = await client.get("/settings")
+    r = await client.get("/admin/settings/general")
     assert r.status_code == 200
     r = await client.post(
-        "/settings", data={"card_number": "3333-4444"}, follow_redirects=False
+        "/admin/settings/payment", data={"card_number": "3333-4444"}, follow_redirects=False
     )
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
     r = await client.get("/api/settings")
@@ -103,7 +126,7 @@ async def test_admin_can_view_and_save_settings(client_with_role) -> None:
 
 async def test_owner_can_save_settings(client_with_role) -> None:
     client = await client_with_role("owner")
-    r = await client.put("/api/settings", json={"values": {"sheba": "IR123"}})
+    r = await client.put("/api/settings", json={"values": {"sheba_number": "IR123"}})
     assert r.status_code == 200
     r = await client.put(
         "/api/settings", json={"values": {"min_wallet_topup": "garbage"}}

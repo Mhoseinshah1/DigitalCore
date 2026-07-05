@@ -2,7 +2,7 @@
 {% block title %}{{ _("web.sign_in") }}{% endblock %}
 {% block anon %}
 <div class="login-wrap">
-  <form class="login-card" method="post" action="/login">
+  <form class="login-card" method="post" action="/admin/login">
     <div class="brand center">Digital<span>Core</span></div>
     <p class="muted center">{{ _("web.panel_subtitle") }}</p>
     {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
@@ -14,9 +14,9 @@
     </label>
     <button type="submit" class="btn primary full">{{ _("web.sign_in") }}</button>
     <div class="lang-switch center">
-      <a href="/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
+      <a href="/admin/lang/fa" class="{% if lang == 'fa' %}active{% endif %}">فارسی</a>
       <span>·</span>
-      <a href="/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
+      <a href="/admin/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
     </div>
   </form>
 </div>

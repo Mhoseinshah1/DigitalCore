@@ -11,7 +11,7 @@
 {% if tested %}<div class="alert ok">{{ _("web.servers.tested", message=tested) }}</div>{% endif %}
 {% if synced %}<div class="alert ok">{{ _("web.servers.synced", count=synced) }}</div>{% endif %}
 
-<p><a class="btn primary" href="/servers/new">➕ {{ _("web.servers.add") }}</a></p>
+<p><a class="btn primary" href="/admin/servers/new">➕ {{ _("web.servers.add") }}</a></p>
 
 {% if not servers %}
 <section class="note"><p class="muted">{{ _("web.servers.empty") }}</p></section>
@@ -43,13 +43,13 @@
           </td>
           <td>{{ counts.get(s.id, 0) }}</td>
           <td class="actions">
-            <form method="post" action="/servers/{{ s.id }}/test">
+            <form method="post" action="/admin/servers/{{ s.id }}/test">
               <button type="submit" class="btn small">🔌 {{ _("web.servers.test") }}</button>
             </form>
-            <form method="post" action="/servers/{{ s.id }}/sync">
+            <form method="post" action="/admin/servers/{{ s.id }}/sync">
               <button type="submit" class="btn small">🔄 {{ _("web.servers.sync") }}</button>
             </form>
-            <form method="post" action="/servers/{{ s.id }}/delete">
+            <form method="post" action="/admin/servers/{{ s.id }}/delete">
               <button type="submit" class="btn small danger">🗑</button>
             </form>
           </td>

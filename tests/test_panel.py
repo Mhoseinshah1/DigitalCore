@@ -1,4 +1,4 @@
-"""Admin panel: reachability, cookie login flow, and settings round-trip."""
+"""Admin panel: reachability, cookie login flow, and settings round-trip (Phase 2)."""
 from __future__ import annotations
 
 import httpx
@@ -21,10 +21,9 @@ ADMIN_PASSWORD = "panel-pw-123"
 # ---------------------------------------------------------------------------
 
 async def test_login_page_renders_fa_rtl_by_default(client) -> None:
-    r = await client.get("/login")
+    r = await client.get("/admin/login")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    # Default language is fa, rendered right-to-left.
     assert 'dir="rtl"' in r.text and 'lang="fa"' in r.text
     assert "ورود" in r.text  # Sign in (fa)
     assert "نام کاربری" in r.text  # Username (fa)
@@ -32,7 +31,7 @@ async def test_login_page_renders_fa_rtl_by_default(client) -> None:
 
 
 async def test_login_page_renders_en_ltr_with_cookie(client) -> None:
-    r = await client.get("/login", cookies={"dc_lang": "en"})
+    r = await client.get("/admin/login", cookies={"dc_lang": "en"})
     assert r.status_code == 200
     assert 'dir="ltr"' in r.text and 'lang="en"' in r.text
     assert "Sign in" in r.text
@@ -46,9 +45,15 @@ async def test_static_css_served(client) -> None:
 
 
 async def test_dashboard_redirects_anonymous_to_login(client) -> None:
+    r = await client.get("/admin", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/admin/login"
+
+
+async def test_root_redirects_to_admin(client) -> None:
     r = await client.get("/", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"] == "/login"
+    assert r.headers["location"] == "/admin"
 
 
 async def test_settings_api_requires_auth(client) -> None:
@@ -62,8 +67,6 @@ async def test_settings_api_requires_auth(client) -> None:
 
 @pytest_asyncio.fixture
 async def panel_client() -> httpx.AsyncClient:
-    """Client against the real app with get_session overridden to a fresh
-    in-memory SQLite database seeded with one admin (test-only create_all)."""
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         poolclass=StaticPool,
@@ -80,6 +83,7 @@ async def panel_client() -> httpx.AsyncClient:
                 password_hash=hash_password(ADMIN_PASSWORD),
                 is_active=True,
                 is_super_admin=True,
+                role="owner",
             )
         )
         await s.commit()
@@ -100,54 +104,44 @@ async def panel_client() -> httpx.AsyncClient:
 
 async def _login(client: httpx.AsyncClient) -> None:
     r = await client.post(
-        "/login",
+        "/admin/login",
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
-    assert r.status_code == 302 and r.headers["location"] == "/"
+    assert r.status_code == 302 and r.headers["location"] == "/admin"
 
 
 async def test_form_login_sets_httponly_cookie_and_dashboard_renders(panel_client) -> None:
     r = await panel_client.post(
-        "/login",
+        "/admin/login",
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
-    assert r.status_code == 302 and r.headers["location"] == "/"
+    assert r.status_code == 302 and r.headers["location"] == "/admin"
     set_cookie = r.headers.get("set-cookie", "")
     assert "dc_session=" in set_cookie
     assert "httponly" in set_cookie.lower()
-    # Plain-HTTP request => the cookie must NOT be Secure, or the browser drops
-    # it and every post-login request bounces back to /login.
     assert "secure" not in set_cookie.lower()
 
     panel_client.cookies.set("dc_lang", "en")
-    r = await panel_client.get("/")
+    r = await panel_client.get("/admin")
     assert r.status_code == 200
     assert "Dashboard" in r.text
-    # The sidebar identity shows the admin's username.
     assert ADMIN_USERNAME in r.text
 
-    # And the same page renders in Persian when the language cookie says fa.
     panel_client.cookies.set("dc_lang", "fa")
-    r = await panel_client.get("/")
+    r = await panel_client.get("/admin")
     assert r.status_code == 200
     assert "داشبورد" in r.text and 'dir="rtl"' in r.text
 
 
 async def test_cookie_not_secure_even_when_panel_url_is_https(panel_client, monkeypatch) -> None:
-    """Regression: WEB_PANEL_URL=https://… must NOT force Secure on plain HTTP.
-
-    The installer writes an https WEB_PANEL_URL while the panel is still served
-    over http://host:8000; deciding Secure from that URL made the browser drop
-    the cookie and login looped for any credentials.
-    """
     from app.config import settings
 
     monkeypatch.setattr(settings, "WEB_PANEL_URL", "https://panel.example.com")
     monkeypatch.setattr(settings, "COOKIE_SECURE", "auto")
     r = await panel_client.post(
-        "/login",
+        "/admin/login",
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
@@ -156,8 +150,7 @@ async def test_cookie_not_secure_even_when_panel_url_is_https(panel_client, monk
     assert "dc_session=" in set_cookie
     assert "secure" not in set_cookie.lower()
 
-    # The follow-up request with that cookie reaches the dashboard (no loop).
-    r = await panel_client.get("/", follow_redirects=False)
+    r = await panel_client.get("/admin", follow_redirects=False)
     assert r.status_code == 200
 
 
@@ -166,7 +159,7 @@ async def test_cookie_secure_forced_true_override(panel_client, monkeypatch) -> 
 
     monkeypatch.setattr(settings, "COOKIE_SECURE", "true")
     r = await panel_client.post(
-        "/login",
+        "/admin/login",
         data={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
@@ -178,7 +171,7 @@ async def test_cookie_secure_forced_true_override(panel_client, monkeypatch) -> 
 
 async def test_form_login_by_email_identifier_also_works(panel_client) -> None:
     r = await panel_client.post(
-        "/login",
+        "/admin/login",
         data={"username": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         follow_redirects=False,
     )
@@ -188,7 +181,7 @@ async def test_form_login_by_email_identifier_also_works(panel_client) -> None:
 async def test_form_login_wrong_password_rejected(panel_client) -> None:
     panel_client.cookies.set("dc_lang", "en")
     r = await panel_client.post(
-        "/login", data={"username": ADMIN_USERNAME, "password": "wrong"}
+        "/admin/login", data={"username": ADMIN_USERNAME, "password": "wrong"}
     )
     assert r.status_code == 401
     assert "Invalid" in r.text
@@ -205,22 +198,23 @@ async def test_api_settings_fresh_install_shows_catalog_defaults(panel_client) -
     }
     # Catalog defaults are visible even though no row has been saved yet.
     assert values["sales_enabled"] is True
-    assert values["low_stock_threshold"] == 5
+    assert values["site_name"] == "DigitalCore"
     assert values["card_number"] == ""
 
 
 async def test_settings_form_roundtrip_and_typed_api(panel_client) -> None:
     await _login(panel_client)
 
-    # Save via the HTML form; unchecked checkboxes mean False.
+    # Save the payment page; card_number/min_wallet_topup/wallet_enabled all live
+    # in the payment category. An omitted checkbox means False.
     r = await panel_client.post(
-        "/settings",
+        "/admin/settings/payment",
         data={"card_number": "6037-1234", "min_wallet_topup": "5000"},
         follow_redirects=False,
     )
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
 
-    r = await panel_client.get("/settings")
+    r = await panel_client.get("/admin/settings/payment")
     assert r.status_code == 200 and "6037-1234" in r.text
 
     r = await panel_client.get("/api/settings")

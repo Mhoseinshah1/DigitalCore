@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ _("wallet.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("wallet.title") }}</h1>
+  <p class="muted">{{ _("wallet.subtitle") }}</p>
+</header>
+
+{% if not txns %}
+<section class="note"><p class="muted">{{ _("wallet.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("wallet.col.time") }}</th>
+          <th>{{ _("wallet.col.user") }}</th>
+          <th>{{ _("wallet.col.amount") }}</th>
+          <th>{{ _("wallet.col.balance") }}</th>
+          <th>{{ _("wallet.col.reason") }}</th>
+          <th>{{ _("wallet.col.actor") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tx in txns %}
+        <tr>
+          <td class="muted">{{ tx.created_at.strftime("%Y-%m-%d %H:%M") if tx.created_at else "—" }}</td>
+          <td><a href="/admin/users/{{ tx.user_id }}">{{ labels.get(tx.user_id, "#" ~ tx.user_id) }}</a></td>
+          <td class="{{ 'pos' if tx.amount >= 0 else 'neg' }}">{{ "{:+,}".format(tx.amount) }}</td>
+          <td>{{ "{:,}".format(tx.balance_after) }}</td>
+          <td class="muted">{{ tx.reason or "—" }}</td>
+          <td class="muted">{{ tx.actor_type }}{% if tx.actor_id %} #{{ tx.actor_id }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -22,12 +22,46 @@ features are added.
   exit), persisted `./storage` into the backend/bot/worker containers, and
   verified the full validation gate (compile, tests, `bash -n`, `docker compose
   config`). No business features added.
-- **Phase 2 — planned.** Admin panel, users management, bot database
-  registration, role-based permissions, first business modules.
+- **Phase 2 — done.** Full admin foundation: a Persian **RTL admin panel** under
+  `/admin` with a right sidebar (grouped, nested sections + active highlighting),
+  admin login, five RBAC roles with permission helpers, **users management**
+  (list/detail, block/unblock, verify, admin note, **wallet balance adjustment**
+  with an audited ledger), **settings pages** (general / telegram / payment /
+  bot messages), **product management foundation**, **audit logs**, bot user
+  registration on `/start` (with blocked-user and maintenance protection), and a
+  Telegram admin panel (`/admin_stats`, `/admin_users`, `/admin_settings`,
+  block/unblock/add/subtract balance by Telegram ID). Purchase flow, receipt
+  approval, license delivery, and 3X-UI provisioning are intentionally NOT
+  included — they are later phases.
 
-> The Phase 0 Jinja admin panel and business-settings catalog remain in the tree
-> but are **dormant** (not wired into the app) because Phase 1 uses an
-> email-based admin model. They are rebuilt properly in Phase 2.
+### Phase 2 admin panel
+
+The panel is served at **`/admin`** (login at `/admin/login`; `/` and `/login`
+redirect there). The right RTL sidebar groups: Dashboard · Users (all / blocked
+/ wallet adjustments) · Products · Payments (payment settings) · Bot settings
+(messages) · System settings (general / telegram / maintenance / sales) · Logs
+(audit) · and clearly-labelled **“coming soon”** placeholders for orders,
+licenses, V2Ray services, 3X-UI servers, tickets, coupons, referrals, backups,
+and reports.
+
+| Area | Routes |
+|------|--------|
+| Auth | `GET/POST /admin/login`, `GET /admin/logout` |
+| Dashboard | `GET /admin` |
+| Users | `GET /admin/users`, `/admin/users/blocked`, `/admin/users/wallet`, `/admin/users/{id}`, `POST /admin/users/{id}/{block,unblock,verify,note,wallet-adjust}` |
+| Settings | `GET/POST /admin/settings/{general,telegram,payment,bot-texts}` |
+| Products | `GET /admin/products`, `/admin/products/create`, `/admin/products/{id}/edit`, `POST …/toggle-active`, `…/delete-or-hide` |
+| Audit | `GET /admin/audit-logs` |
+
+**Roles & permissions** (`app/core/permissions.py`): `owner` (all), `admin`
+(users/settings/products/wallet/payments/logs), `support` (view + block users),
+`accountant` (view users, adjust wallet, view payments), `viewer` (read-only
+dashboard + users). Helpers: `is_owner`, `can_view_dashboard`,
+`can_manage_users`, `can_adjust_wallet`, `can_manage_settings`,
+`can_manage_products`, `can_view_payments`, `can_view_logs`, `can_manage_admins`.
+
+Every sensitive action (login, block/unblock, wallet adjust, settings change,
+product create/update/toggle) writes an **audit log** row.
 
 ## Architecture
 
@@ -240,10 +274,17 @@ GET  /api/auth/me       Authorization: Bearer <token>          -> admin profile
 
 ## Database
 
-Migrations are explicit (`op.create_table`, not `create_all`). Phase 1 tables:
-`admins` (email/password), `users` (telegram user, nullable for now), `settings`
-(key/value/is_secret). The backend does **not** auto-migrate; run migrations
-explicitly as shown above.
+Migrations are explicit (`op.create_table`, not `create_all`); the backend does
+**not** auto-migrate — run migrations explicitly as shown above. Core tables:
+`admins`, `users` (telegram profile + `wallet_balance`, `is_blocked`,
+`is_verified`, `admin_note`, `language_code`), `settings` (key/value/is_secret),
+`products`, `audit_logs` (+ `meta`/`ip_address`), `wallet_transactions` (signed
+ledger), and the 3X-UI tables. Phase 2 adds migration **0008** (user/audit
+columns, `wallet_transactions`, settings-key reconciliation) — it runs cleanly on
+a fresh **and** an existing database and preserves operator-entered values.
+
+Run `python -m app.seed` once after migrating to insert the default settings
+rows (idempotent; never overwrites custom values).
 
 ## Environment
 
@@ -281,8 +322,9 @@ The canonical name wins if both are set.
   `ModuleNotFoundError` means a runtime import isn't declared in
   `requirements.txt` (it must not live only in `requirements-dev.txt`). This is
   guarded by `tests/test_foundation_install.py` and `scripts/smoke_test.sh`.
-- **Where is the panel?** — the admin panel is served at `/` (which redirects to
-  `/login` when signed out). `/admin` is accepted too and redirects to `/`.
+- **Where is the panel?** — the admin panel is served at `/admin` (login at
+  `/admin/login`; it redirects there when signed out). `/` and `/login` redirect
+  to the panel for convenience.
 - **`scripts/install.sh: No such file or directory`** — run from the repository
   root after cloning: `cd digitalcore && sudo bash scripts/install.sh`. Make sure
   the clone completed and you are in the project directory.

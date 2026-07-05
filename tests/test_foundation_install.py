@@ -78,10 +78,10 @@ def test_httpx_is_a_production_dependency() -> None:
 
 
 async def test_admin_route_redirects_not_404(client) -> None:
-    """/admin must be reachable (redirect), never a 404 'panel does not open'."""
+    """/admin must be reachable (redirect to login when anonymous), never a 404."""
     r = await client.get("/admin", follow_redirects=False)
     assert r.status_code in (302, 307)
-    assert r.headers["location"] == "/"
+    assert r.headers["location"] == "/admin/login"
 
 
 def _settings_with(env: dict[str, str]) -> Settings:
