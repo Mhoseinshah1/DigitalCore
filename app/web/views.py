@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,13 +32,15 @@ from app.database import get_session
 from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
 from app.models.product import PRODUCT_TYPES, Product
-from app.models.xui_inbound import XuiInbound
 from app.schemas.product import ProductCreate, ProductUpdate
-from app.services import audit_service, product_service, user_service, xui_service
+from app.services import (
+    audit_service,
+    product_service,
+    user_service,
+    xui_server_service,
+)
 from app.web.api.auth import authenticate_admin
 from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_cookie
-from app.xui.exceptions import XuiError
-from app.xui.registry import SUPPORTED_VERSIONS
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -90,6 +92,15 @@ NAV_TREE: list[dict] = [
          "permission": "manage_products", "placeholder": True},
     ]},
 
+    {"label_key": "nav.xui", "icon": "🛰", "children": [
+        {"label_key": "nav.xui.servers", "icon": "🖥", "href": "/admin/xui-servers",
+         "permission": "manage_xui"},
+        {"label_key": "nav.xui.inbounds", "icon": "🔌", "href": "/admin/xui-inbounds",
+         "permission": "manage_xui"},
+        {"label_key": "nav.xui.v2ray_products", "icon": "🌐", "href": "/admin/products",
+         "permission": "manage_products"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -129,8 +140,6 @@ NAV_TREE: list[dict] = [
          "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.services", "icon": "🌐", "href": "/admin/services",
          "permission": "manage_products", "placeholder": True},
-        {"label_key": "nav.future.xui", "icon": "🖥", "href": "/admin/servers",
-         "permission": "manage_xui"},
         {"label_key": "nav.future.tickets", "icon": "🎫", "href": "/admin/tickets",
          "permission": "view_dashboard", "placeholder": True},
         {"label_key": "nav.future.coupons", "icon": "🏷", "href": "/admin/coupons",
@@ -678,20 +687,38 @@ def _parse_int_opt(raw: object) -> int | None:
 
 
 def _product_form_values(form: dict[str, object]) -> dict[str, object]:
+    """Coerce the product form into schema kwargs.
+
+    A "license" product never carries an XUI binding, so we drop any stray
+    server/inbound values the browser may have posted for it — the type-aware
+    form disables those controls but we do not trust the client.
+    """
+    type_ = str(form.get("type", "")).strip()
+    xui_server_id = _parse_int_opt(form.get("xui_server_id"))
+    xui_inbound_id = _parse_int_opt(form.get("xui_inbound_id"))
+    if type_ != "v2ray":
+        xui_server_id = None
+        xui_inbound_id = None
     return {
-        "type": str(form.get("type", "")).strip(),
+        "type": type_,
         "title": str(form.get("title", "")).strip(),
         "description": (str(form.get("description", "")).strip() or None),
         "price": _parse_int_opt(form.get("price")) or 0,
         "duration_days": _parse_int_opt(form.get("duration_days")),
         "traffic_gb": _parse_int_opt(form.get("traffic_gb")),
         "ip_limit": _parse_int_opt(form.get("ip_limit")),
-        "server_id": _parse_int_opt(form.get("server_id")),
-        "inbound_id": _parse_int_opt(form.get("inbound_id")),
+        "xui_server_id": xui_server_id,
+        "xui_inbound_id": xui_inbound_id,
         "is_active": "is_active" in form,
         "is_hidden": "is_hidden" in form,
         "sort_order": _parse_int_opt(form.get("sort_order")) or 0,
     }
+
+
+async def _product_form_ctx(session: AsyncSession) -> dict[str, object]:
+    """Server/inbound options shared by the product create + edit forms."""
+    servers = await xui_server_service.list_servers(session, active_only=True)
+    return {"xui_servers": servers}
 
 
 @router.get("/products", response_class=HTMLResponse)
@@ -716,13 +743,15 @@ async def products_page(
 async def product_new_page(
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
 ):
     lang, deny = _guard(request, admin, "manage_products")
     if deny:
         return deny
     return templates.TemplateResponse(
         "product_form.html",
-        _ctx(request, admin, product=None, product_types=PRODUCT_TYPES, error=""),
+        _ctx(request, admin, product=None, product_types=PRODUCT_TYPES, error="",
+             inbounds=[], **await _product_form_ctx(session)),
     )
 
 
@@ -758,9 +787,15 @@ async def product_edit_page(
     product = await product_service.get(session, product_id)
     if product is None:
         return RedirectResponse("/admin/products", status_code=302)
+    # Pre-populate the inbound dropdown with the bound server's inbounds so the
+    # current selection renders without JavaScript.
+    inbounds: list = []
+    if product.xui_server_id:
+        inbounds = await xui_server_service.list_inbounds(session, product.xui_server_id)
     return templates.TemplateResponse(
         "product_form.html",
-        _ctx(request, admin, product=product, product_types=PRODUCT_TYPES, error=""),
+        _ctx(request, admin, product=product, product_types=PRODUCT_TYPES, error="",
+             inbounds=inbounds, **await _product_form_ctx(session)),
     )
 
 
@@ -852,19 +887,32 @@ async def audit_logs_page(
 
 
 # --------------------------------------------------------------------------
-# 3X-UI servers (manage_xui) — built earlier; kept working under /admin.
+# V2Ray / 3X-UI servers + inbounds (manage_xui)
+#
+# Foundation only: manage panel records and their inbounds so V2Ray products can
+# be bound to a specific server+inbound. Live connectivity (test / sync) is
+# best-effort and never blocks CRUD. Credentials are never rendered.
 # --------------------------------------------------------------------------
-async def _inbound_counts(session: AsyncSession) -> dict[int, int]:
-    result = await session.execute(
-        select(XuiInbound.server_id, func.count(XuiInbound.id)).group_by(
-            XuiInbound.server_id
-        )
-    )
-    return {server_id: count for server_id, count in result.all()}
+def _server_form_values(form: dict[str, object]) -> dict[str, object]:
+    """Extract server form fields. Password/token empty means 'keep existing'."""
+    return {
+        "name": str(form.get("name", "")).strip(),
+        "base_url": str(form.get("base_url", "")).strip(),
+        "username": str(form.get("username", "")).strip() or None,
+        "password": str(form.get("password", "")) or None,
+        "api_token": str(form.get("api_token", "")).strip() or None,
+        "is_active": "is_active" in form,
+    }
 
 
-@router.get("/servers", response_class=HTMLResponse)
-async def servers_page(
+# --- old /admin/servers routes now live at /admin/xui-servers ---------------
+@router.get("/servers")
+async def servers_legacy_redirect():
+    return RedirectResponse("/admin/xui-servers", status_code=301)
+
+
+@router.get("/xui-servers", response_class=HTMLResponse)
+async def xui_servers_page(
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
@@ -876,17 +924,17 @@ async def servers_page(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
-    servers = await xui_service.list_servers(session)
-    counts = await _inbound_counts(session)
+    servers = await xui_server_service.list_servers(session)
+    counts = await xui_server_service.inbound_counts(session)
     return templates.TemplateResponse(
-        "servers.html",
+        "xui_servers.html",
         _ctx(request, admin, servers=servers, counts=counts,
              saved=bool(saved), error=error, tested=tested, synced=synced),
     )
 
 
-@router.get("/servers/new", response_class=HTMLResponse)
-async def server_new_page(
+@router.get("/xui-servers/create", response_class=HTMLResponse)
+async def xui_server_new_page(
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
 ):
@@ -894,13 +942,202 @@ async def server_new_page(
     if deny:
         return deny
     return templates.TemplateResponse(
-        "server_form.html",
-        _ctx(request, admin, versions=SUPPORTED_VERSIONS, error=""),
+        "xui_server_form.html",
+        _ctx(request, admin, server=None, error=""),
     )
 
 
-@router.post("/servers/new")
-async def server_create_submit(
+@router.post("/xui-servers/create")
+async def xui_server_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    values = _server_form_values(dict(await request.form()))
+    try:
+        await xui_server_service.create_server(
+            session, actor_id=admin.id, **values
+        )
+        await session.commit()
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(
+            f"/admin/xui-servers?error={quote(str(exc))}", status_code=303
+        )
+    return RedirectResponse("/admin/xui-servers?saved=1", status_code=303)
+
+
+@router.get("/xui-servers/{server_id}/edit", response_class=HTMLResponse)
+async def xui_server_edit_page(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    server = await xui_server_service.get_server(session, server_id)
+    if server is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    return templates.TemplateResponse(
+        "xui_server_form.html",
+        _ctx(request, admin, server=server, error=""),
+    )
+
+
+@router.post("/xui-servers/{server_id}/edit")
+async def xui_server_edit_submit(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    values = _server_form_values(dict(await request.form()))
+    try:
+        server = await xui_server_service.update_server(
+            session, server_id, actor_id=admin.id, **values
+        )
+        await session.commit()
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(
+            f"/admin/xui-servers?error={quote(str(exc))}", status_code=303
+        )
+    if server is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    return RedirectResponse("/admin/xui-servers?saved=1", status_code=303)
+
+
+@router.post("/xui-servers/{server_id}/deactivate")
+async def xui_server_deactivate(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    await xui_server_service.delete_or_deactivate_server(
+        session, server_id, actor_id=admin.id
+    )
+    await session.commit()
+    return RedirectResponse("/admin/xui-servers?saved=1", status_code=303)
+
+
+@router.post("/xui-servers/{server_id}/test")
+async def xui_server_test(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    result = await xui_server_service.test_connection(session, server_id, actor_id=admin.id)
+    await session.commit()
+    message = str(result.get("message", ""))
+    return RedirectResponse(
+        f"/admin/xui-servers?tested={quote(message)}", status_code=303
+    )
+
+
+@router.post("/xui-servers/{server_id}/sync-inbounds")
+async def xui_server_sync(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    result = await xui_server_service.sync_inbounds(session, server_id, actor_id=admin.id)
+    await session.commit()
+    if not result.get("ok"):
+        return RedirectResponse(
+            f"/admin/xui-servers?error={quote(str(result.get('message', '')))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin/xui-servers?synced={result.get('count', 0)}", status_code=303
+    )
+
+
+# --- inbounds ----------------------------------------------------------------
+@router.get("/xui-inbounds", response_class=HTMLResponse)
+async def xui_inbounds_overview(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Read-only overview of every inbound grouped by server."""
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    servers = await xui_server_service.list_servers(session)
+    groups = []
+    for s in servers:
+        groups.append(
+            {"server": s, "inbounds": await xui_server_service.list_inbounds(session, s.id)}
+        )
+    return templates.TemplateResponse(
+        "xui_inbounds_overview.html",
+        _ctx(request, admin, groups=groups),
+    )
+
+
+@router.get("/xui-servers/{server_id}/inbounds", response_class=HTMLResponse)
+async def xui_server_inbounds_page(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: int = 0,
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    server = await xui_server_service.get_server(session, server_id)
+    if server is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    inbounds = await xui_server_service.list_inbounds(session, server_id)
+    return templates.TemplateResponse(
+        "xui_inbounds.html",
+        _ctx(request, admin, server=server, inbounds=inbounds,
+             saved=bool(saved), error=error),
+    )
+
+
+@router.get("/xui-servers/{server_id}/inbounds/create", response_class=HTMLResponse)
+async def xui_inbound_new_page(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    server = await xui_server_service.get_server(session, server_id)
+    if server is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    return templates.TemplateResponse(
+        "xui_inbound_form.html",
+        _ctx(request, admin, server=server, inbound=None, error=""),
+    )
+
+
+@router.post("/xui-servers/{server_id}/inbounds/create")
+async def xui_inbound_create_submit(
+    server_id: int,
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
@@ -909,29 +1146,34 @@ async def server_create_submit(
     if deny:
         return deny
     form = dict(await request.form())
-    web_base_path = str(form.get("web_base_path", "")).strip() or None
-    api_token = str(form.get("api_token", "")).strip() or None
     try:
-        await xui_service.add_server(
-            session,
-            name=str(form.get("name", "")).strip(),
-            base_url=str(form.get("base_url", "")).strip(),
-            username=str(form.get("username", "")).strip(),
-            password=str(form.get("password", "")),
-            web_base_path=web_base_path,
-            panel_version=str(form.get("panel_version", "2.9.4")).strip(),
-            api_token=api_token,
-            actor_type="admin",
+        inbound_id = _parse_int_opt(form.get("inbound_id"))
+        if inbound_id is None:
+            raise ValueError("inbound_id is required")
+        await xui_server_service.create_inbound(
+            session, server_id, inbound_id,
+            remark=str(form.get("remark", "")).strip() or None,
+            protocol=str(form.get("protocol", "")).strip() or None,
+            port=_parse_int_opt(form.get("port")),
+            network=str(form.get("network", "")).strip() or None,
+            security=str(form.get("security", "")).strip() or None,
+            is_active="is_active" in form,
             actor_id=admin.id,
         )
+        await session.commit()
     except (ValueError, TypeError) as exc:
-        return RedirectResponse(f"/admin/servers?error={quote(str(exc))}", status_code=303)
-    return RedirectResponse("/admin/servers?saved=1", status_code=303)
+        return RedirectResponse(
+            f"/admin/xui-servers/{server_id}/inbounds?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303
+    )
 
 
-@router.post("/servers/{server_id}/test")
-async def server_test_connection(
-    server_id: int,
+@router.get("/xui-inbounds/{inbound_record_id}/edit", response_class=HTMLResponse)
+async def xui_inbound_edit_page(
+    inbound_record_id: int,
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
@@ -939,17 +1181,19 @@ async def server_test_connection(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
-    server = await xui_service.get_server(session, server_id)
-    if server is None:
-        return RedirectResponse("/admin/servers", status_code=303)
-    result = await xui_service.test_connection(session, server)
-    message = str(result.get("message", ""))
-    return RedirectResponse(f"/admin/servers?tested={quote(message)}", status_code=303)
+    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
+    if inbound is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    server = await xui_server_service.get_server(session, inbound.server_id)
+    return templates.TemplateResponse(
+        "xui_inbound_form.html",
+        _ctx(request, admin, server=server, inbound=inbound, error=""),
+    )
 
 
-@router.post("/servers/{server_id}/sync")
-async def server_sync_inbounds(
-    server_id: int,
+@router.post("/xui-inbounds/{inbound_record_id}/edit")
+async def xui_inbound_edit_submit(
+    inbound_record_id: int,
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
@@ -957,19 +1201,37 @@ async def server_sync_inbounds(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
-    server = await xui_service.get_server(session, server_id)
-    if server is None:
-        return RedirectResponse("/admin/servers", status_code=303)
+    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
+    if inbound is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    server_id = inbound.server_id
+    form = dict(await request.form())
     try:
-        count = await xui_service.sync_inbounds(session, server)
-    except XuiError as exc:
-        return RedirectResponse(f"/admin/servers?error={quote(str(exc))}", status_code=303)
-    return RedirectResponse(f"/admin/servers?synced={count}", status_code=303)
+        await xui_server_service.update_inbound(
+            session, inbound_record_id,
+            inbound_id=_parse_int_opt(form.get("inbound_id")),
+            remark=str(form.get("remark", "")).strip() or None,
+            protocol=str(form.get("protocol", "")).strip() or None,
+            port=_parse_int_opt(form.get("port")),
+            network=str(form.get("network", "")).strip() or None,
+            security=str(form.get("security", "")).strip() or None,
+            is_active="is_active" in form,
+            actor_id=admin.id,
+        )
+        await session.commit()
+    except (ValueError, TypeError) as exc:
+        return RedirectResponse(
+            f"/admin/xui-servers/{server_id}/inbounds?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303
+    )
 
 
-@router.post("/servers/{server_id}/delete")
-async def server_delete(
-    server_id: int,
+@router.post("/xui-inbounds/{inbound_record_id}/deactivate")
+async def xui_inbound_deactivate(
+    inbound_record_id: int,
     request: Request,
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
@@ -977,5 +1239,42 @@ async def server_delete(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
-    await xui_service.delete_server(session, server_id, actor_type="admin", actor_id=admin.id)
-    return RedirectResponse("/admin/servers?saved=1", status_code=303)
+    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
+    if inbound is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    server_id = inbound.server_id
+    await xui_server_service.deactivate_inbound(session, inbound_record_id, actor_id=admin.id)
+    await session.commit()
+    return RedirectResponse(
+        f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303
+    )
+
+
+# --- JSON: active inbounds for a server (feeds the product form dropdown) ----
+@router.get("/api/xui-servers/{server_id}/inbounds")
+async def xui_server_inbounds_json(
+    server_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    if admin is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not has_permission(admin.role, "manage_products"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    inbounds = await xui_server_service.list_inbounds(session, server_id, active_only=True)
+    return JSONResponse(
+        {
+            "server_id": server_id,
+            "inbounds": [
+                {
+                    "id": ib.id,
+                    "inbound_id": ib.inbound_id,
+                    "remark": ib.remark,
+                    "protocol": ib.protocol,
+                    "port": ib.port,
+                }
+                for ib in inbounds
+            ],
+        }
+    )

@@ -38,31 +38,6 @@
                value="{{ product.price if product else 0 }}">
       </div>
       <div class="field">
-        <label for="duration_days">{{ _("web.products.form.duration") }}</label>
-        <input id="duration_days" name="duration_days" type="number" min="0"
-               value="{{ product.duration_days if product and product.duration_days is not none else '' }}">
-      </div>
-      <div class="field">
-        <label for="traffic_gb">{{ _("web.products.form.traffic") }}</label>
-        <input id="traffic_gb" name="traffic_gb" type="number" min="0"
-               value="{{ product.traffic_gb if product and product.traffic_gb is not none else '' }}">
-      </div>
-      <div class="field">
-        <label for="ip_limit">{{ _("web.products.form.ip_limit") }}</label>
-        <input id="ip_limit" name="ip_limit" type="number" min="0"
-               value="{{ product.ip_limit if product and product.ip_limit is not none else '' }}">
-      </div>
-      <div class="field">
-        <label for="server_id">{{ _("web.products.form.server_id") }}</label>
-        <input id="server_id" name="server_id" type="number" min="0"
-               value="{{ product.server_id if product and product.server_id is not none else '' }}">
-      </div>
-      <div class="field">
-        <label for="inbound_id">{{ _("web.products.form.inbound_id") }}</label>
-        <input id="inbound_id" name="inbound_id" type="number" min="0"
-               value="{{ product.inbound_id if product and product.inbound_id is not none else '' }}">
-      </div>
-      <div class="field">
         <label for="sort_order">{{ _("web.products.form.sort_order") }}</label>
         <input id="sort_order" name="sort_order" type="number"
                value="{{ product.sort_order if product else 0 }}">
@@ -84,9 +59,110 @@
     </div>
   </section>
 
+  <!-- V2Ray-only binding + specs; hidden entirely for license products. -->
+  <section class="panel" id="v2ray-fields">
+    <h2 class="panel-title">{{ _("web.products.form.v2ray_section") }}</h2>
+    <p class="muted">{{ _("web.products.form.v2ray_bind_hint") }}</p>
+    <div class="fields">
+      <div class="field">
+        <label for="duration_days">{{ _("web.products.form.duration") }}</label>
+        <input id="duration_days" name="duration_days" type="number" min="0"
+               value="{{ product.duration_days if product and product.duration_days is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="traffic_gb">{{ _("web.products.form.traffic") }}</label>
+        <input id="traffic_gb" name="traffic_gb" type="number" min="0"
+               value="{{ product.traffic_gb if product and product.traffic_gb is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="ip_limit">{{ _("web.products.form.ip_limit") }}</label>
+        <input id="ip_limit" name="ip_limit" type="number" min="0"
+               value="{{ product.ip_limit if product and product.ip_limit is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="xui_server_id">{{ _("web.products.form.xui_server") }}</label>
+        <select id="xui_server_id" name="xui_server_id"
+                data-inbounds-url="/admin/api/xui-servers">
+          <option value="">{{ _("web.products.form.pick_server") }}</option>
+          {% for s in xui_servers %}
+          <option value="{{ s.id }}"
+                  {% if product and product.xui_server_id == s.id %}selected{% endif %}>
+            {{ s.name }}
+          </option>
+          {% endfor %}
+        </select>
+        {% if not xui_servers %}
+        <small class="muted">{{ _("web.products.form.no_servers") }}</small>
+        {% endif %}
+      </div>
+      <div class="field">
+        <label for="xui_inbound_id">{{ _("web.products.form.xui_inbound") }}</label>
+        <select id="xui_inbound_id" name="xui_inbound_id"
+                data-current="{{ product.xui_inbound_id if product and product.xui_inbound_id is not none else '' }}">
+          <option value="">{{ _("web.products.form.pick_inbound") }}</option>
+          {% for ib in inbounds %}
+          <option value="{{ ib.id }}"
+                  {% if product and product.xui_inbound_id == ib.id %}selected{% endif %}>
+            #{{ ib.inbound_id }}{% if ib.remark %} · {{ ib.remark }}{% endif %}{% if ib.protocol %} ({{ ib.protocol }}){% endif %}{% if not ib.is_active %} — {{ _("web.xui.inbounds.off") }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </section>
+
   <div class="form-actions">
     <button type="submit" class="btn primary">{{ _("web.products.form.save") }}</button>
     <a class="btn" href="/admin/products">{{ _("web.products.form.cancel") }}</a>
   </div>
 </form>
+
+<script>
+  (function () {
+    var typeSel = document.getElementById('type');
+    var v2rayBox = document.getElementById('v2ray-fields');
+    var serverSel = document.getElementById('xui_server_id');
+    var inboundSel = document.getElementById('xui_inbound_id');
+    var pickInbound = {{ _("web.products.form.pick_inbound")|tojson }};
+
+    function toggleType() {
+      var isV2 = typeSel.value === 'v2ray';
+      v2rayBox.style.display = isV2 ? '' : 'none';
+    }
+
+    function loadInbounds(preselect) {
+      var sid = serverSel.value;
+      // Reset to just the placeholder.
+      inboundSel.innerHTML = '';
+      var opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = pickInbound;
+      inboundSel.appendChild(opt0);
+      if (!sid) { return; }
+      fetch(serverSel.getAttribute('data-inbounds-url') + '/' + sid + '/inbounds', {
+        headers: {'Accept': 'application/json'}, credentials: 'same-origin'
+      })
+        .then(function (r) { return r.ok ? r.json() : {inbounds: []}; })
+        .then(function (data) {
+          (data.inbounds || []).forEach(function (ib) {
+            var o = document.createElement('option');
+            o.value = ib.id;
+            var label = '#' + ib.inbound_id;
+            if (ib.remark) { label += ' · ' + ib.remark; }
+            if (ib.protocol) { label += ' (' + ib.protocol + ')'; }
+            o.textContent = label;
+            if (preselect && String(ib.id) === String(preselect)) { o.selected = true; }
+            inboundSel.appendChild(o);
+          });
+        })
+        .catch(function () { /* leave placeholder only */ });
+    }
+
+    if (typeSel) { typeSel.addEventListener('change', toggleType); toggleType(); }
+    if (serverSel) {
+      // On manual server change, refetch the active inbound list (no preselect).
+      serverSel.addEventListener('change', function () { loadInbounds(null); });
+    }
+  })();
+</script>
 {% endblock %}

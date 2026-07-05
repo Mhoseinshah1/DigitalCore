@@ -6,13 +6,23 @@ ciphertext via app/core/crypto.py and are never logged or rendered in plaintext.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
-XUI_STATUSES: tuple[str, ...] = ("unknown", "online", "offline", "auth_error")
+if TYPE_CHECKING:
+    from app.models.xui_inbound import XuiInbound
+
+# `status` reflects the last health check. The first four are the Phase 2.1
+# vocabulary; the low-level health-check service (app/services/xui_service.py)
+# also uses online/offline/auth_error, so both sets are accepted here.
+XUI_STATUSES: tuple[str, ...] = (
+    "unknown", "active", "inactive", "error",
+    "online", "offline", "auth_error",
+)
 
 
 class XuiServer(Base, TimestampMixin):
@@ -26,13 +36,22 @@ class XuiServer(Base, TimestampMixin):
     panel_type: Mapped[str] = mapped_column(String(32), default="3x-ui", nullable=False)
     panel_version: Mapped[str] = mapped_column(String(32), default="2.9.4", nullable=False)
 
-    username: Mapped[str] = mapped_column(String(120), nullable=False)
-    encrypted_password: Mapped[str] = mapped_column(Text, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    encrypted_password: Mapped[str | None] = mapped_column(Text, nullable=True)
     encrypted_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
+    # Admin on/off switch, independent of the health `status`.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
     last_health_check: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    inbounds: Mapped[list["XuiInbound"]] = relationship(
+        "XuiInbound", back_populates="server", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper

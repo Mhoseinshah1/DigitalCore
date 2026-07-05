@@ -72,35 +72,47 @@ async def client_with_role() -> AsyncIterator[ClientFactory]:
 VALID_FORM = {
     "name": "RBAC Server",
     "base_url": "http://panel.example:2053",
-    "panel_version": "2.9.4",
     "username": "admin",
     "password": "panel-pw",
+    "is_active": "on",
 }
 
 
 async def test_viewer_cannot_view_or_create_servers(client_with_role) -> None:
     client = await client_with_role("viewer")
-    r = await client.get("/admin/servers")
+    r = await client.get("/admin/xui-servers")
     assert r.status_code == 403
-    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post(
+        "/admin/xui-servers/create", data=VALID_FORM, follow_redirects=False
+    )
     assert r.status_code == 403
 
 
 async def test_accountant_cannot_manage_servers(client_with_role) -> None:
     client = await client_with_role("accountant")
-    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post(
+        "/admin/xui-servers/create", data=VALID_FORM, follow_redirects=False
+    )
     assert r.status_code == 403
 
 
 async def test_admin_can_create_and_list_servers(client_with_role) -> None:
     client = await client_with_role("admin")
-    r = await client.get("/admin/servers")
+    r = await client.get("/admin/xui-servers")
     assert r.status_code == 200
 
-    r = await client.post("/admin/servers/new", data=VALID_FORM, follow_redirects=False)
+    r = await client.post(
+        "/admin/xui-servers/create", data=VALID_FORM, follow_redirects=False
+    )
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
 
-    r = await client.get("/admin/servers")
+    r = await client.get("/admin/xui-servers")
     assert "RBAC Server" in r.text
-    # The chosen panel version is rendered verbatim (language-independent).
-    assert "2.9.4" in r.text
+    assert "http://panel.example:2053" in r.text
+
+
+async def test_legacy_servers_path_redirects(client_with_role) -> None:
+    client = await client_with_role("admin")
+    r = await client.get("/admin/servers", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/admin/xui-servers"

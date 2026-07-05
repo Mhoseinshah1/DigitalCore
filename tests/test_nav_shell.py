@@ -138,7 +138,7 @@ def test_nav_owner_sees_everything() -> None:
     hrefs = _all_hrefs(build_nav(Role.OWNER, "en", "/admin"))
     for expected in ("/admin", "/admin/users", "/admin/products",
                      "/admin/settings/general", "/admin/settings/payment",
-                     "/admin/audit-logs", "/admin/servers"):
+                     "/admin/audit-logs", "/admin/xui-servers", "/admin/xui-inbounds"):
         assert expected in hrefs
 
 
@@ -148,7 +148,7 @@ def test_nav_viewer_is_reduced() -> None:
     assert "/admin" in hrefs
     assert "/admin/users" in hrefs
     for hidden in ("/admin/products", "/admin/settings/general",
-                   "/admin/settings/payment", "/admin/audit-logs", "/admin/servers"):
+                   "/admin/settings/payment", "/admin/audit-logs", "/admin/xui-servers"):
         assert hidden not in hrefs
 
 

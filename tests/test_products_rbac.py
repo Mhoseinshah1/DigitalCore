@@ -105,9 +105,39 @@ async def test_admin_can_create_and_list_products(client_with_role) -> None:
 
 async def test_owner_create_v2ray_requires_specs(client_with_role) -> None:
     client = await client_with_role("owner")
+    # Missing specs AND missing binding → rejected.
     bad = {"type": "v2ray", "title": "No specs", "price": "5000", "is_active": "on"}
     r = await client.post("/admin/products/create", data=bad, follow_redirects=False)
     assert r.status_code == 303 and "error=" in r.headers["location"]
+
+    # Specs present but no XUI binding → still rejected.
+    no_bind = {
+        "type": "v2ray", "title": "No bind", "price": "90000",
+        "duration_days": "30", "traffic_gb": "50", "is_active": "on",
+    }
+    r = await client.post("/admin/products/create", data=no_bind, follow_redirects=False)
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+
+    # Seed an active server + inbound through the real XUI routes (fresh DB → id 1).
+    r = await client.post(
+        "/admin/xui-servers/create",
+        data={"name": "Srv", "base_url": "http://p:2053", "is_active": "on"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
+    r = await client.post(
+        "/admin/xui-servers/1/inbounds/create",
+        data={"inbound_id": "100", "remark": "main", "protocol": "vless", "is_active": "on"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
+
+    # The JSON endpoint returns the active inbound for the product dropdown.
+    r = await client.get("/admin/api/xui-servers/1/inbounds")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["inbounds"] and payload["inbounds"][0]["inbound_id"] == 100
+    inbound_record_id = payload["inbounds"][0]["id"]
 
     good = {
         "type": "v2ray",
@@ -115,6 +145,9 @@ async def test_owner_create_v2ray_requires_specs(client_with_role) -> None:
         "price": "90000",
         "duration_days": "30",
         "traffic_gb": "50",
+        "ip_limit": "2",
+        "xui_server_id": "1",
+        "xui_inbound_id": str(inbound_record_id),
         "is_active": "on",
     }
     r = await client.post("/admin/products/create", data=good, follow_redirects=False)

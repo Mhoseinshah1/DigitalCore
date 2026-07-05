@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.models import AuditLog
+from app.models import AuditLog, XuiInbound, XuiServer
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import product_service
 
@@ -27,6 +27,21 @@ def _v2ray(**overrides) -> ProductCreate:
     return ProductCreate(**payload)
 
 
+async def _seed_binding(db_session, *, server_active=True, inbound_active=True):
+    """Create an active XUI server + inbound; return (server_id, inbound_id)."""
+    server = XuiServer(
+        name="S1", base_url="http://p:2053", status="active", is_active=server_active
+    )
+    db_session.add(server)
+    await db_session.flush()
+    inbound = XuiInbound(
+        server_id=server.id, inbound_id=1, remark="in", is_active=inbound_active
+    )
+    db_session.add(inbound)
+    await db_session.flush()
+    return server.id, inbound.id
+
+
 async def test_create_license_without_v2ray_fields(db_session) -> None:
     product = await product_service.create(db_session, _license())
     await db_session.commit()
@@ -36,9 +51,56 @@ async def test_create_license_without_v2ray_fields(db_session) -> None:
 
 
 async def test_create_v2ray_ok(db_session) -> None:
-    product = await product_service.create(db_session, _v2ray())
+    sid, iid = await _seed_binding(db_session)
+    product = await product_service.create(
+        db_session, _v2ray(xui_server_id=sid, xui_inbound_id=iid)
+    )
     await db_session.commit()
     assert product.duration_days == 30 and product.traffic_gb == 50
+    assert product.xui_server_id == sid and product.xui_inbound_id == iid
+
+
+async def test_v2ray_requires_xui_binding(db_session) -> None:
+    # No server/inbound at all → rejected at field level.
+    with pytest.raises(ValueError):
+        await product_service.create(db_session, _v2ray())
+    # Server but no inbound → rejected.
+    sid, _iid = await _seed_binding(db_session)
+    with pytest.raises(ValueError):
+        await product_service.create(db_session, _v2ray(xui_server_id=sid))
+
+
+async def test_license_must_not_set_xui_binding(db_session) -> None:
+    sid, iid = await _seed_binding(db_session)
+    with pytest.raises(ValueError):
+        await product_service.create(
+            db_session, _license(xui_server_id=sid, xui_inbound_id=iid)
+        )
+
+
+async def test_v2ray_inbound_must_belong_to_server(db_session) -> None:
+    sid_a, _iid_a = await _seed_binding(db_session)
+    sid_b, iid_b = await _seed_binding(db_session)  # inbound of a different server
+    with pytest.raises(ValueError):
+        await product_service.create(
+            db_session, _v2ray(xui_server_id=sid_a, xui_inbound_id=iid_b)
+        )
+
+
+async def test_active_v2ray_needs_active_server_and_inbound(db_session) -> None:
+    sid, iid = await _seed_binding(db_session, inbound_active=False)
+    with pytest.raises(ValueError):
+        await product_service.create(
+            db_session,
+            _v2ray(xui_server_id=sid, xui_inbound_id=iid, is_active=True),
+        )
+    # The same binding is fine for an INACTIVE product.
+    product = await product_service.create(
+        db_session,
+        _v2ray(xui_server_id=sid, xui_inbound_id=iid, is_active=False),
+    )
+    await db_session.commit()
+    assert product.is_active is False
 
 
 @pytest.mark.parametrize(
@@ -63,7 +125,10 @@ async def test_invalid_type_and_empty_title_rejected(db_session) -> None:
 
 
 async def test_update_changes_fields_and_validates_merged_state(db_session) -> None:
-    product = await product_service.create(db_session, _v2ray())
+    sid, iid = await _seed_binding(db_session)
+    product = await product_service.create(
+        db_session, _v2ray(xui_server_id=sid, xui_inbound_id=iid)
+    )
     await db_session.commit()
 
     updated = await product_service.update(

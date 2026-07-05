@@ -12,6 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import PRODUCT_TYPES, Product
+from app.models.xui_inbound import XuiInbound
+from app.models.xui_server import XuiServer
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import audit_service
 
@@ -25,6 +27,8 @@ _EDITABLE_FIELDS = (
     "ip_limit",
     "server_id",
     "inbound_id",
+    "xui_server_id",
+    "xui_inbound_id",
     "is_active",
     "is_hidden",
     "sort_order",
@@ -37,19 +41,59 @@ def validate_product(
     price: int,
     duration_days: int | None,
     traffic_gb: int | None,
+    xui_server_id: int | None = None,
+    xui_inbound_id: int | None = None,
 ) -> None:
-    """Raise ValueError when the combination is not a valid product."""
+    """Raise ValueError when the field combination is not a valid product.
+
+    (Field-level checks only; the XUI server/inbound records are verified against
+    the database by `validate_xui_binding`.)
+    """
     if type_ not in PRODUCT_TYPES:
         raise ValueError(f"type must be one of {PRODUCT_TYPES}, got {type_!r}")
     if not (title or "").strip():
         raise ValueError("title must not be empty")
     if price is None or int(price) < 0:
         raise ValueError("price must be >= 0")
+    if type_ == "license":
+        if xui_server_id is not None or xui_inbound_id is not None:
+            raise ValueError("license products must not set an XUI server/inbound")
     if type_ == "v2ray":
         if not duration_days or int(duration_days) <= 0:
             raise ValueError("v2ray products require duration_days > 0")
         if not traffic_gb or int(traffic_gb) <= 0:
             raise ValueError("v2ray products require traffic_gb > 0")
+        if not xui_server_id:
+            raise ValueError("v2ray products require an XUI server")
+        if not xui_inbound_id:
+            raise ValueError("v2ray products require an XUI inbound")
+
+
+async def validate_xui_binding(
+    session: AsyncSession,
+    type_: str,
+    xui_server_id: int | None,
+    xui_inbound_id: int | None,
+    *,
+    is_active: bool,
+) -> None:
+    """Verify the XUI binding against the DB (v2ray only). Raises ValueError.
+
+    The inbound must belong to the chosen server; for an ACTIVE product both the
+    server and inbound must themselves be active.
+    """
+    if type_ != "v2ray":
+        return
+    server = await session.get(XuiServer, xui_server_id)
+    if server is None:
+        raise ValueError("selected XUI server does not exist")
+    inbound = await session.get(XuiInbound, xui_inbound_id)
+    if inbound is None:
+        raise ValueError("selected XUI inbound does not exist")
+    if inbound.server_id != server.id:
+        raise ValueError("the selected inbound does not belong to the selected server")
+    if is_active and (not server.is_active or not inbound.is_active):
+        raise ValueError("an active V2Ray product needs an active server and inbound")
 
 
 async def get(session: AsyncSession, product_id: int) -> Product | None:
@@ -80,7 +124,13 @@ async def create(
     actor_type: str = "system",
     actor_id: int | None = None,
 ) -> Product:
-    validate_product(data.type, data.title, data.price, data.duration_days, data.traffic_gb)
+    validate_product(
+        data.type, data.title, data.price, data.duration_days, data.traffic_gb,
+        data.xui_server_id, data.xui_inbound_id,
+    )
+    await validate_xui_binding(
+        session, data.type, data.xui_server_id, data.xui_inbound_id, is_active=data.is_active
+    )
     product = Product(
         type=data.type,
         title=data.title.strip(),
@@ -91,6 +141,8 @@ async def create(
         ip_limit=data.ip_limit,
         server_id=data.server_id,
         inbound_id=data.inbound_id,
+        xui_server_id=data.xui_server_id,
+        xui_inbound_id=data.xui_inbound_id,
         is_active=data.is_active,
         is_hidden=data.is_hidden,
         sort_order=data.sort_order,
@@ -106,6 +158,16 @@ async def create(
         target_id=product.id,
         new=f"type={product.type} title={product.title!r} price={product.price}",
     )
+    if product.type == "v2ray":
+        await audit_service.log(
+            session,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="product_bound_to_xui",
+            target_type="product",
+            target_id=product.id,
+            new=f"xui_server_id={product.xui_server_id} xui_inbound_id={product.xui_inbound_id}",
+        )
     await session.refresh(product)
     return product
 
@@ -134,6 +196,9 @@ async def update(
         "price": product.price,
         "duration_days": product.duration_days,
         "traffic_gb": product.traffic_gb,
+        "xui_server_id": product.xui_server_id,
+        "xui_inbound_id": product.xui_inbound_id,
+        "is_active": product.is_active,
     }
     merged.update({k: v for k, v in changes.items() if k in merged})
     validate_product(
@@ -142,6 +207,12 @@ async def update(
         merged["price"],
         merged["duration_days"],
         merged["traffic_gb"],
+        merged["xui_server_id"],
+        merged["xui_inbound_id"],
+    )
+    await validate_xui_binding(
+        session, merged["type"], merged["xui_server_id"], merged["xui_inbound_id"],
+        is_active=bool(merged["is_active"]),
     )
 
     old_parts: list[str] = []

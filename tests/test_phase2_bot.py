@@ -125,6 +125,35 @@ async def test_blocked_middleware_blocks_non_admin(bot_db) -> None:
     assert event.answers == [FA("blocked.active")]
 
 
+def test_v2ray_detail_shows_specs_and_safe_server_only() -> None:
+    """The detail view renders duration/traffic/ip_limit and a friendly server
+    name, but must never expose panel base_url/username/inbound id."""
+    from app.bot.handlers.user.products import build_detail_lines
+
+    product = Product(
+        type="v2ray", title="Germany 30d", price=90000,
+        duration_days=30, traffic_gb=50, ip_limit=2,
+        xui_server_id=1, xui_inbound_id=1,
+    )
+    body = "\n".join(build_detail_lines(product, "Germany-1", "en"))
+    assert "30 days" in body
+    assert "50 GB" in body
+    assert "IP limit: 2" in body
+    assert "Germany-1" in body  # safe label
+    # None of the sensitive credentials/ids leak (they are never passed in).
+    for leak in ("http://", "root", "base_url", "username", "inbound_id"):
+        assert leak not in body
+
+
+def test_license_detail_omits_v2ray_specs() -> None:
+    from app.bot.handlers.user.products import build_detail_lines
+
+    product = Product(type="license", title="Win Key", price=150000)
+    body = "\n".join(build_detail_lines(product, None, "en"))
+    assert "Win Key" in body
+    assert "days" not in body and "GB" not in body and "IP limit" not in body
+
+
 async def test_blocked_middleware_passes_admin_and_normal_user(bot_db) -> None:
     async with bot_db() as s:
         user, _ = await user_service.create_or_update_from_telegram(s, telegram_id=70007)

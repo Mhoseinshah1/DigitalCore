@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from app.database import SessionLocal
 from app.i18n import t, texts_for
 from app.models.product import Product
-from app.services import product_service
+from app.services import product_service, xui_server_service
 
 router = Router(name="user.products")
 
@@ -27,6 +27,25 @@ def _summary_line(product: Product, lang: str) -> str:
         parts.append(t("product.duration_fmt", lang, days=product.duration_days))
         parts.append(t("product.traffic_fmt", lang, gb=product.traffic_gb))
     return " · ".join(parts)
+
+
+def build_detail_lines(product: Product, server_name: str | None, lang: str) -> list[str]:
+    """The user-facing product detail. Renders only safe, presentational fields —
+    never a server's base_url/username or the panel-side inbound id."""
+    lines = [f"<b>{product.title}</b>", ""]
+    lines.append(f"{t(f'product.type.{product.type}', lang)} · {_price_text(product, lang)}")
+    if product.type == "v2ray":
+        lines.append(
+            f"{t('product.duration_fmt', lang, days=product.duration_days)} · "
+            f"{t('product.traffic_fmt', lang, gb=product.traffic_gb)}"
+        )
+        if product.ip_limit:
+            lines.append(t("product.ip_limit_fmt", lang, n=product.ip_limit))
+        if server_name:
+            lines.append(t("product.server_fmt", lang, name=server_name))
+    if product.description:
+        lines.extend(["", product.description])
+    return lines
 
 
 @router.message(Command("products"))
@@ -60,20 +79,16 @@ async def on_product_detail(
     product_id = int((callback.data or "0")[len(CB_DETAIL):])
     async with SessionLocal() as session:
         product = await product_service.get(session, product_id)
+        if product is None or not product.is_active or product.is_hidden:
+            await callback.answer(_("products.unknown"), show_alert=True)
+            return
+        # A safe, user-facing server label only — never base_url/username/inbound.
+        server_name: str | None = None
+        if product.type == "v2ray" and product.xui_server_id:
+            server = await xui_server_service.get_server(session, product.xui_server_id)
+            server_name = server.name if server is not None else None
 
-    if product is None or not product.is_active or product.is_hidden:
-        await callback.answer(_("products.unknown"), show_alert=True)
-        return
-
-    lines = [f"<b>{product.title}</b>", ""]
-    lines.append(f"{t(f'product.type.{product.type}', lang)} · {_price_text(product, lang)}")
-    if product.type == "v2ray":
-        lines.append(
-            f"{t('product.duration_fmt', lang, days=product.duration_days)} · "
-            f"{t('product.traffic_fmt', lang, gb=product.traffic_gb)}"
-        )
-    if product.description:
-        lines.extend(["", product.description])
+    lines = build_detail_lines(product, server_name, lang)
     # Buying is not enabled yet (arrives in a later phase).
     lines.extend(["", _("products.user.buy_soon")])
 

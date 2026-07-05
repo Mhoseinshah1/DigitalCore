@@ -16,6 +16,8 @@ class ProductCreate(BaseModel):
     ip_limit: int | None = None
     server_id: int | None = None
     inbound_id: int | None = None
+    xui_server_id: int | None = None
+    xui_inbound_id: int | None = None
     is_active: bool = True
     is_hidden: bool = False
     sort_order: int = 0
@@ -33,6 +35,8 @@ class ProductUpdate(BaseModel):
     ip_limit: int | None = None
     server_id: int | None = None
     inbound_id: int | None = None
+    xui_server_id: int | None = None
+    xui_inbound_id: int | None = None
     is_active: bool | None = None
     is_hidden: bool | None = None
     sort_order: int | None = None
@@ -51,6 +55,8 @@ class ProductRead(BaseModel):
     ip_limit: int | None
     server_id: int | None
     inbound_id: int | None
+    xui_server_id: int | None
+    xui_inbound_id: int | None
     is_active: bool
     is_hidden: bool
     stock_count: int

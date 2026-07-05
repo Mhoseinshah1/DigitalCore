@@ -6,7 +6,7 @@ now; they are validated against a real 3X-UI panel in a later phase.
 """
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -31,9 +31,19 @@ class Product(Base, TimestampMixin):
     traffic_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ip_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Stored references only in this phase (no 3X-UI validation yet).
+    # Legacy plain-int references (panel-side ids); superseded by the FK bindings
+    # below and kept only for backward compatibility.
     server_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     inbound_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # V2Ray binding: which stored XuiServer record + XuiInbound record this
+    # product provisions on. Required for type=="v2ray", null for licenses.
+    xui_server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("xui_servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    xui_inbound_id: Mapped[int | None] = mapped_column(
+        ForeignKey("xui_inbounds.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

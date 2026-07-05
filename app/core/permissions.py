@@ -140,3 +140,11 @@ def can_view_logs(role: object) -> bool:
 
 def can_manage_admins(role: object) -> bool:
     return has_permission(role, "manage_admins")
+
+
+def can_manage_xui_servers(role: object) -> bool:
+    return has_permission(role, "manage_xui")
+
+
+def can_manage_xui_inbounds(role: object) -> bool:
+    return has_permission(role, "manage_xui")

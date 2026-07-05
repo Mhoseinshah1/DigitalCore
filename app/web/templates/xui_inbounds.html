@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.xui.inbounds.title", name=server.name) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.xui.inbounds.title", name=server.name) }}</h1>
+  <p class="muted">{{ _("web.xui.inbounds.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.xui.inbounds.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.xui.inbounds.not_saved", error=error) }}</div>{% endif %}
+
+<p>
+  <a class="btn primary" href="/admin/xui-servers/{{ server.id }}/inbounds/create">➕ {{ _("web.xui.inbounds.add") }}</a>
+  <a class="btn" href="/admin/xui-servers">{{ _("web.xui.inbounds.back") }}</a>
+  <form method="post" action="/admin/xui-servers/{{ server.id }}/sync-inbounds" style="display:inline">
+    <button type="submit" class="btn">🔄 {{ _("web.xui.servers.sync") }}</button>
+  </form>
+</p>
+
+{% if not inbounds %}
+<section class="note"><p class="muted">{{ _("web.xui.inbounds.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.xui.inbounds.col.inbound_id") }}</th>
+          <th>{{ _("web.xui.inbounds.col.remark") }}</th>
+          <th>{{ _("web.xui.inbounds.col.protocol") }}</th>
+          <th>{{ _("web.xui.inbounds.col.port") }}</th>
+          <th>{{ _("web.xui.inbounds.col.network") }}</th>
+          <th>{{ _("web.xui.inbounds.col.security") }}</th>
+          <th>{{ _("web.xui.inbounds.col.active") }}</th>
+          <th>{{ _("web.xui.inbounds.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ib in inbounds %}
+        <tr>
+          <td>{{ ib.inbound_id }}</td>
+          <td>{{ ib.remark or "—" }}</td>
+          <td>{{ ib.protocol or "—" }}</td>
+          <td>{{ ib.port or "—" }}</td>
+          <td>{{ ib.network or "—" }}</td>
+          <td>{{ ib.security or "—" }}</td>
+          <td>
+            {% if ib.is_active %}<span class="pill ok">{{ _("web.xui.inbounds.on") }}</span>
+            {% else %}<span class="pill">{{ _("web.xui.inbounds.off") }}</span>{% endif %}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/admin/xui-inbounds/{{ ib.id }}/edit">{{ _("web.xui.inbounds.edit") }}</a>
+            {% if ib.is_active %}
+            <form method="post" action="/admin/xui-inbounds/{{ ib.id }}/deactivate">
+              <button type="submit" class="btn small danger">{{ _("web.xui.inbounds.deactivate") }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

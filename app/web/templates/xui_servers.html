@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.xui.servers.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.xui.servers.title") }}</h1>
+  <p class="muted">{{ _("web.xui.servers.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.xui.servers.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.xui.servers.not_saved", error=error) }}</div>{% endif %}
+{% if tested %}<div class="alert ok">{{ _("web.xui.servers.tested", message=tested) }}</div>{% endif %}
+{% if synced %}<div class="alert ok">{{ _("web.xui.servers.synced", count=synced) }}</div>{% endif %}
+
+<p><a class="btn primary" href="/admin/xui-servers/create">➕ {{ _("web.xui.servers.add") }}</a></p>
+
+{% if not servers %}
+<section class="note"><p class="muted">{{ _("web.xui.servers.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.xui.servers.col.name") }}</th>
+          <th>{{ _("web.xui.servers.col.url") }}</th>
+          <th>{{ _("web.xui.servers.col.status") }}</th>
+          <th>{{ _("web.xui.servers.col.active") }}</th>
+          <th>{{ _("web.xui.servers.col.inbounds") }}</th>
+          <th>{{ _("web.xui.servers.col.health") }}</th>
+          <th>{{ _("web.xui.servers.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in servers %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td class="muted">{{ s.base_url }}</td>
+          <td>
+            {% if s.status in ("active", "online") %}<span class="pill ok">{{ _("xui.status." ~ s.status) }}</span>
+            {% else %}<span class="pill">{{ _("xui.status." ~ s.status) }}</span>{% endif %}
+            {% if s.last_error %}<div class="muted small" title="{{ s.last_error }}">⚠️ {{ s.last_error|truncate(60) }}</div>{% endif %}
+          </td>
+          <td>
+            {% if s.is_active %}<span class="pill ok">{{ _("web.xui.servers.on") }}</span>
+            {% else %}<span class="pill">{{ _("web.xui.servers.off") }}</span>{% endif %}
+          </td>
+          <td><a href="/admin/xui-servers/{{ s.id }}/inbounds">{{ counts.get(s.id, 0) }}</a></td>
+          <td class="muted small">
+            {% if s.last_health_check %}{{ s.last_health_check.strftime("%Y-%m-%d %H:%M") }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/admin/xui-servers/{{ s.id }}/edit">{{ _("web.xui.servers.edit") }}</a>
+            <a class="btn small" href="/admin/xui-servers/{{ s.id }}/inbounds">🔌 {{ _("web.xui.servers.manage_inbounds") }}</a>
+            <form method="post" action="/admin/xui-servers/{{ s.id }}/test">
+              <button type="submit" class="btn small">🔌 {{ _("web.xui.servers.test") }}</button>
+            </form>
+            <form method="post" action="/admin/xui-servers/{{ s.id }}/sync-inbounds">
+              <button type="submit" class="btn small">🔄 {{ _("web.xui.servers.sync") }}</button>
+            </form>
+            {% if s.is_active %}
+            <form method="post" action="/admin/xui-servers/{{ s.id }}/deactivate">
+              <button type="submit" class="btn small danger">{{ _("web.xui.servers.deactivate") }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

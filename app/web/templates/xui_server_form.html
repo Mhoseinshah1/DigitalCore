@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{% if server %}{{ _("web.xui.servers.form.edit_title") }}{% else %}{{ _("web.xui.servers.form.create_title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if server %}{{ _("web.xui.servers.form.edit_title") }}{% else %}{{ _("web.xui.servers.form.create_title") }}{% endif %}</h1>
+  <p class="muted">{{ _("web.xui.servers.subtitle") }}</p>
+</header>
+
+{% if error %}<div class="alert error">{{ _("web.xui.servers.not_saved", error=error) }}</div>{% endif %}
+
+<form method="post"
+      action="{% if server %}/admin/xui-servers/{{ server.id }}/edit{% else %}/admin/xui-servers/create{% endif %}"
+      class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="name">{{ _("web.xui.servers.form.name") }}</label>
+        <input id="name" name="name" type="text" required
+               value="{{ server.name if server else '' }}">
+      </div>
+      <div class="field">
+        <label for="base_url">{{ _("web.xui.servers.form.base_url") }}</label>
+        <input id="base_url" name="base_url" type="text" required
+               placeholder="http://1.2.3.4:2053"
+               value="{{ server.base_url if server else '' }}">
+      </div>
+      <div class="field">
+        <label for="username">{{ _("web.xui.servers.form.username") }}</label>
+        <input id="username" name="username" type="text" autocomplete="off"
+               value="{{ server.username or '' if server else '' }}">
+      </div>
+      <div class="field">
+        <label for="password">{{ _("web.xui.servers.form.password") }}</label>
+        <input id="password" name="password" type="password" autocomplete="new-password"
+               placeholder="{% if server %}{{ _('web.xui.servers.form.password_keep') }}{% endif %}">
+        {% if server %}<small class="muted">{{ _("web.xui.servers.form.password_hint") }}</small>{% endif %}
+      </div>
+      <div class="field">
+        <label for="api_token">{{ _("web.xui.servers.form.api_token") }}</label>
+        <input id="api_token" name="api_token" type="password" autocomplete="new-password"
+               placeholder="{% if server %}{{ _('web.xui.servers.form.token_keep') }}{% endif %}">
+        {% if server %}<small class="muted">{{ _("web.xui.servers.form.token_hint") }}</small>{% endif %}
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="is_active" {% if not server or server.is_active %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.xui.servers.form.is_active") }}</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.xui.servers.form.save") }}</button>
+    <a class="btn" href="/admin/xui-servers">{{ _("web.xui.servers.form.cancel") }}</a>
+  </div>
+</form>
+{% endblock %}

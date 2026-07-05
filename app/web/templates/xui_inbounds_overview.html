@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.xui.overview.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.xui.overview.title") }}</h1>
+  <p class="muted">{{ _("web.xui.overview.subtitle") }}</p>
+</header>
+
+{% if not groups %}
+<section class="note"><p class="muted">{{ _("web.xui.servers.empty") }}</p></section>
+{% else %}
+{% for g in groups %}
+<section class="panel">
+  <h2 class="panel-title">
+    {{ g.server.name }}
+    <a class="btn small" href="/admin/xui-servers/{{ g.server.id }}/inbounds">{{ _("web.xui.overview.manage") }}</a>
+  </h2>
+  {% if not g.inbounds %}
+  <p class="muted">{{ _("web.xui.inbounds.empty") }}</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.xui.inbounds.col.inbound_id") }}</th>
+          <th>{{ _("web.xui.inbounds.col.remark") }}</th>
+          <th>{{ _("web.xui.inbounds.col.protocol") }}</th>
+          <th>{{ _("web.xui.inbounds.col.port") }}</th>
+          <th>{{ _("web.xui.inbounds.col.active") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ib in g.inbounds %}
+        <tr>
+          <td>{{ ib.inbound_id }}</td>
+          <td>{{ ib.remark or "—" }}</td>
+          <td>{{ ib.protocol or "—" }}</td>
+          <td>{{ ib.port or "—" }}</td>
+          <td>
+            {% if ib.is_active %}<span class="pill ok">{{ _("web.xui.inbounds.on") }}</span>
+            {% else %}<span class="pill">{{ _("web.xui.inbounds.off") }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

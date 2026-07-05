@@ -33,6 +33,39 @@ features are added.
   block/unblock/add/subtract balance by Telegram ID). Purchase flow, receipt
   approval, license delivery, and 3X-UI provisioning are intentionally NOT
   included — they are later phases.
+- **Phase 2.1 — done.** V2Ray / 3X-UI **server-binding foundation**: manage
+  multiple 3X-UI panels and their inbounds from the admin panel, and bind every
+  **V2Ray** product to exactly one server + one inbound (license products carry
+  no binding). Server passwords and API tokens are stored **Fernet-encrypted**,
+  never rendered, and never written to audit metadata; an empty password/token
+  on edit keeps the stored one. The product form is **type-aware** (license
+  hides the XUI fields; V2Ray shows server + inbound dropdowns fed by a JSON
+  endpoint), and the bot's V2Ray detail view shows duration/traffic/IP-limit and
+  an optional friendly server name only. Creating clients in 3X-UI, payment
+  approval, provisioning, subscription/QR links, and traffic sync jobs are still
+  NOT included — later phases.
+
+### Phase 2.1 — V2Ray / 3X-UI binding
+
+A new **“V2Ray / 3X-UI”** sidebar group (permission `manage_xui`) manages panel
+servers and their inbounds so V2Ray products can be bound to a concrete
+server+inbound. Credentials are encrypted at rest (`app/core/crypto.py`); the
+server list/edit pages and audit logs never reveal them. Live **test /
+sync-inbounds** are best-effort and never block CRUD or product binding.
+
+| Area | Routes |
+|------|--------|
+| Servers | `GET /admin/xui-servers`, `/admin/xui-servers/create`, `/admin/xui-servers/{id}/edit`, `POST …/{id}/{deactivate,test,sync-inbounds}` |
+| Inbounds | `GET /admin/xui-servers/{id}/inbounds`, `…/inbounds/create`, `GET /admin/xui-inbounds/{id}/edit`, `POST /admin/xui-inbounds/{id}/{edit,deactivate}`, `GET /admin/xui-inbounds` (overview) |
+| Product binding | `GET /admin/api/xui-servers/{id}/inbounds` (JSON, active only) feeds the type-aware product form |
+
+Validation (`app/services/product_service.py`): a `license` product must not set
+a server/inbound; a `v2ray` product **requires** duration, traffic, a server and
+an inbound; the inbound must belong to the chosen server; and an **active**
+V2Ray product needs an active server and inbound. The legacy `/admin/servers`
+path now `301`-redirects to `/admin/xui-servers`. Audited actions:
+`xui_server_created/updated/deactivated/tested`, `xui_inbounds_synced`,
+`xui_inbound_created/updated/deactivated`, `product_bound_to_xui`.
 
 ### Phase 2 admin panel
 
@@ -280,8 +313,11 @@ Migrations are explicit (`op.create_table`, not `create_all`); the backend does
 `is_verified`, `admin_note`, `language_code`), `settings` (key/value/is_secret),
 `products`, `audit_logs` (+ `meta`/`ip_address`), `wallet_transactions` (signed
 ledger), and the 3X-UI tables. Phase 2 adds migration **0008** (user/audit
-columns, `wallet_transactions`, settings-key reconciliation) — it runs cleanly on
-a fresh **and** an existing database and preserves operator-entered values.
+columns, `wallet_transactions`, settings-key reconciliation); Phase 2.1 adds
+migration **0009** (`xui_servers.is_active/last_error`, nullable
+`username`/`encrypted_password`, `xui_inbounds.network/security`, and the
+`products.xui_server_id/xui_inbound_id` FK bindings). Both run cleanly on a fresh
+**and** an existing database and preserve operator-entered values.
 
 Run `python -m app.seed` once after migrating to insert the default settings
 rows (idempotent; never overwrites custom values).
