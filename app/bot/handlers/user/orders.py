@@ -51,7 +51,8 @@ class PurchaseStates(StatesGroup):
 # Menu buttons/commands that must never be swallowed by the receipt-wait guidance.
 _NAV_TEXTS: set[str] = set()
 for _key in ("btn.products", "btn.account", "btn.support", "btn.rules",
-             "btn.language", "btn.admin_panel", "btn.my_orders", "btn.my_licenses"):
+             "btn.language", "btn.admin_panel", "btn.my_orders", "btn.my_licenses",
+             "btn.my_services"):
     _NAV_TEXTS |= texts_for(_key)
 
 

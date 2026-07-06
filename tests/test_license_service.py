@@ -263,9 +263,12 @@ async def test_dispatcher_license_delivers(db_session, tmp_path) -> None:
     assert result["delivered"] is True
 
 
-async def test_dispatcher_v2ray_placeholder(db_session) -> None:
+async def test_dispatcher_v2ray_fails_safe_without_server(db_session) -> None:
+    # Phase 6: v2ray now really provisions. With a bound server that does not
+    # exist, provisioning fails SAFELY — the order is not delivered, stays
+    # provisioning_pending, and the approval is never rolled back.
     p = Product(type="v2ray", title="VPN", price=1000, duration_days=30, traffic_gb=10,
-                is_active=True, is_hidden=False, xui_server_id=1, xui_inbound_id=1)
+                is_active=True, is_hidden=False, xui_server_id=999, xui_inbound_id=999)
     u = User(telegram_id=9, first_name="B")
     db_session.add_all([p, u])
     await db_session.flush()
@@ -276,7 +279,8 @@ async def test_dispatcher_v2ray_placeholder(db_session) -> None:
     await db_session.flush()
     await db_session.refresh(order)
     result = await delivery_service.deliver_order(db_session, order)
-    assert result["reason"] == "provisioning_pending" and order.status == "provisioning_pending"
+    assert result["delivered"] is False and result["reason"] == "server_missing"
+    assert order.status == "provisioning_pending"
 
 
 # --- security ---------------------------------------------------------------

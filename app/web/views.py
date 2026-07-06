@@ -42,6 +42,7 @@ from app.services import (
     payment_service,
     product_service,
     user_service,
+    v2ray_service,
     wallet_service,
     xui_server_service,
 )
@@ -123,6 +124,15 @@ NAV_TREE: list[dict] = [
          "permission": "view_licenses"},
         {"label_key": "nav.licenses.low_stock", "icon": "📉", "href": "/admin/licenses/low-stock",
          "permission": "view_licenses"},
+    ]},
+
+    {"label_key": "nav.services", "icon": "🌐", "children": [
+        {"label_key": "nav.services.all", "icon": "🌐", "href": "/admin/v2ray-services",
+         "permission": "view_services"},
+        {"label_key": "nav.services.active", "icon": "✅",
+         "href": "/admin/v2ray-services?status=active", "permission": "view_services"},
+        {"label_key": "nav.services.failed", "icon": "⚠️",
+         "href": "/admin/v2ray-services?status=failed", "permission": "view_services"},
     ]},
 
     {"label_key": "nav.payments", "icon": "💳", "children": [
@@ -1921,3 +1931,178 @@ async def license_replace(
     except license_service.LicenseError as exc:
         return _license_back(license_id, error=str(exc))
     return _license_back(license_id, saved="replaced")
+
+
+# --------------------------------------------------------------------------
+# V2Ray services (Phase 6) — provisioned 3X-UI clients.
+#
+# List/detail need `view_services`; refresh-usage is `view_services` (support may
+# refresh); disable/enable/delete/reset/retry need `manage_services`. No XUI
+# credential (panel password/token) is ever rendered.
+# --------------------------------------------------------------------------
+_GB = 1024 ** 3
+
+
+def _mask_uuid(u: str | None) -> str:
+    if not u:
+        return "—"
+    return u if len(u) <= 8 else f"{u[:4]}…{u[-4:]}"
+
+
+def _gb_disp(byte_count: int | None) -> str:
+    b = int(byte_count or 0)
+    if b <= 0:
+        return "∞"
+    return f"{b / _GB:.2f} GB"
+
+
+def _v2ray_row(svc, lang: str) -> dict:
+    user = svc.user
+    return {
+        "id": svc.id,
+        "user_label": (user.username or (user.telegram_id and str(user.telegram_id))
+                       or f"#{svc.user_id}") if user else "—",
+        "product_title": svc.product.title if svc.product else "—",
+        "server_name": svc.xui_server.name if svc.xui_server else "—",
+        "inbound": svc.xui_inbound.inbound_id if svc.xui_inbound else "—",
+        "client_email": svc.client_email,
+        "status": svc.status,
+        "used_disp": _gb_disp(svc.used_gb),
+        "total_disp": _gb_disp(svc.total_gb),
+        "expire_at": svc.expire_at,
+        "created_at": svc.created_at,
+    }
+
+
+@router.get("/v2ray-services", response_class=HTMLResponse)
+async def v2ray_services_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    status: str = "",
+    server_id: int = 0,
+    product_id: int = 0,
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_services")
+    if deny:
+        return deny
+    services = await v2ray_service.list_services(
+        session, status=(status or None), server_id=(server_id or None),
+        product_id=(product_id or None), limit=200,
+    )
+    rows = [_v2ray_row(s, lang) for s in services]
+    counts = await v2ray_service.count_by_status(session)
+    return templates.TemplateResponse(
+        "v2ray_services.html",
+        _ctx(request, admin, rows=rows, counts=counts, status=status,
+             saved=saved, error=error),
+    )
+
+
+@router.get("/v2ray-services/{service_id}", response_class=HTMLResponse)
+async def v2ray_service_detail_page(
+    service_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_services")
+    if deny:
+        return deny
+    svc = await v2ray_service.get_service(session, service_id)
+    if svc is None:
+        return RedirectResponse("/admin/v2ray-services", status_code=302)
+    logs = [
+        r for r in await audit_service.list_recent(session, limit=500)
+        if (r.target_type == "v2ray_service" and str(r.target_id) == str(svc.id))
+        or (r.target_type == "order" and str(r.target_id) == str(svc.order_id))
+    ]
+    return templates.TemplateResponse(
+        "v2ray_service_detail.html",
+        _ctx(request, admin, svc=svc, masked_uuid=_mask_uuid(svc.client_uuid),
+             used_disp=_gb_disp(svc.used_gb), total_disp=_gb_disp(svc.total_gb),
+             logs=logs, can_manage=has_permission(admin.role, "manage_services"),
+             saved=saved, error=error),
+    )
+
+
+def _service_back(service_id: int, *, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/v2ray-services/{service_id}?{q}", status_code=303)
+
+
+@router.post("/v2ray-services/{service_id}/refresh-usage")
+async def v2ray_refresh_usage(
+    service_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_services")
+    if deny:
+        return deny
+    svc = await v2ray_service.refresh_service_usage(session, service_id, actor_id=admin.id)
+    if svc is None:
+        return RedirectResponse("/admin/v2ray-services", status_code=302)
+    return _service_back(service_id, saved="refreshed")
+
+
+def _service_action(perm: str, saved: str):
+    """Build a POST handler that runs one manage-services action + flash."""
+    async def handler(
+        service_id: int,
+        request: Request,
+        admin: Admin | None = Depends(get_current_admin_optional),
+        session: AsyncSession = Depends(get_session),
+    ):
+        lang, deny = _guard(request, admin, perm)
+        if deny:
+            return deny
+        fn = getattr(v2ray_service, {
+            "disabled": "disable_service",
+            "enabled": "enable_service",
+            "deleted": "delete_service",
+            "reset": "reset_service_traffic",
+        }[saved])
+        try:
+            await fn(session, service_id, actor_id=admin.id)
+            await session.commit()
+        except v2ray_service.V2RayError as exc:
+            return _service_back(service_id, error=str(exc))
+        return _service_back(service_id, saved=saved)
+    return handler
+
+
+for _saved in ("disabled", "enabled", "deleted", "reset"):
+    _path_seg = {"disabled": "disable", "enabled": "enable",
+                 "deleted": "delete", "reset": "reset-traffic"}[_saved]
+    router.add_api_route(
+        f"/v2ray-services/{{service_id}}/{_path_seg}",
+        _service_action("manage_services", _saved),
+        methods=["POST"], include_in_schema=False,
+    )
+
+
+@router.post("/orders/{order_id}/retry-v2ray-provisioning")
+async def order_retry_v2ray(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_services")
+    if deny:
+        return deny
+    try:
+        result = await v2ray_service.retry_failed_provisioning(
+            session, order_id, actor_id=admin.id
+        )
+    except v2ray_service.V2RayError as exc:
+        return _order_back(order_id, error=str(exc))
+    if result.get("ok"):
+        return _order_back(order_id, saved="approved")
+    return _order_back(order_id, error=f"v2ray:{result.get('reason', 'failed')}")

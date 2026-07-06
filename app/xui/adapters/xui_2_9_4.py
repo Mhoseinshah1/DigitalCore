@@ -19,7 +19,9 @@ PATH_GET = "/panel/api/inbounds/get/{inbound_id}"
 PATH_ADD_CLIENT = "/panel/api/inbounds/addClient"
 PATH_UPDATE_CLIENT = "/panel/api/inbounds/updateClient/{client_uuid}"
 PATH_DEL_CLIENT = "/panel/api/inbounds/{inbound_id}/delClient/{client}"
-PATH_RESET_TRAFFIC = "/panel/api/inbounds/resetClientTraffic/{inbound_id}/{email}"
+# Reset path is inbound-id-first per the 3X-UI API: POST
+# /panel/api/inbounds/{inboundId}/resetClientTraffic/{email}.
+PATH_RESET_TRAFFIC = "/panel/api/inbounds/{inbound_id}/resetClientTraffic/{email}"
 PATH_GET_TRAFFIC = "/panel/api/inbounds/getClientTraffics/{email}"
 
 

@@ -225,6 +225,26 @@ async def verify_client(
     return actual
 
 
+async def find_client(
+    server: XuiServer,
+    inbound_id: int,
+    email: str,
+    *,
+    adapter: PanelAdapter | None = None,
+    transport: httpx.BaseTransport | None = None,
+    sleep: SleepFn | None = None,
+) -> Client | None:
+    """Return the client with `email` on the inbound, or None. Used for
+    idempotent provisioning (detect a client left by a prior partial run)."""
+    a = adapter or build_adapter(server, transport=transport, sleep=sleep)
+    try:
+        await a.login()
+        return await a.find_client(inbound_id, email)
+    finally:
+        if adapter is None:
+            await a.aclose()
+
+
 async def add_client(
     server: XuiServer,
     inbound_id: int,

@@ -1,19 +1,20 @@
 """3X-UI "latest" adapter.
 
-Subclasses the v2.9.4 adapter and overrides ONLY what differs in the newest
-3X-UI release. Where a difference is unconfirmed, the 2.9.4 behaviour is kept
-and a TODO marks it for verification against a real panel — nothing is guessed
-silently.
+Subclasses the v2.9.4 adapter. The current MHSanaei/3x-ui API keeps the same
+inbound/client route shapes 2.9.4 uses, so every operation is inherited verbatim.
+Confirmed against the latest API (MHSanaei/3x-ui panel controller routes):
 
-Known/likely candidates to confirm against a live latest panel:
-  - TODO(latest): confirm the delete-client path. Some newer builds expose
-    POST {base}/panel/api/inbounds/delClient/{inboundId}/{clientUuid} (uuid,
-    not email) rather than 2.9.4's {inboundId}/delClient/{clientUuidOrEmail}.
-  - TODO(latest): confirm getClientTraffics still returns a single obj (some
-    builds return a list) and whether a getClientTrafficsById variant exists.
-  - TODO(latest): confirm addClient/updateClient still take the JSON-string
-    `settings` field (unchanged through 2.9.x) and no new required fields.
-Until confirmed, every operation inherits the 2.9.4 implementation verbatim.
+  - list/get inbound:  GET  /panel/api/inbounds/list, GET /panel/api/inbounds/get/{id}
+  - addClient:         POST /panel/api/inbounds/addClient   (form: id, settings-JSON)
+  - updateClient:      POST /panel/api/inbounds/updateClient/{clientUuid}
+  - delClient:         POST /panel/api/inbounds/{inboundId}/delClient/{clientId}
+  - resetClientTraffic:POST /panel/api/inbounds/{inboundId}/resetClientTraffic/{email}
+  - getClientTraffics: GET  /panel/api/inbounds/getClientTraffics/{email}  (single obj)
+
+The `settings` JSON string and its client fields (id/email/enable/expiryTime[ms]/
+totalGB[bytes]/limitIp/subId/tgId) are unchanged, so no field overrides are
+needed. Should a future release diverge, override only the differing path/parse
+here — nothing is guessed.
 """
 from __future__ import annotations
 
@@ -24,5 +25,4 @@ class XuiLatestAdapter(Xui294Adapter):
     panel_type = "3x-ui"
     panel_version = "latest"
 
-    # No overrides yet — see the module docstring for the TODO list of endpoints
-    # to confirm before diverging from 2.9.4.
+    # Endpoints confirmed identical to 2.9.4 against the latest API (see docstring).

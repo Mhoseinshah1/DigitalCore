@@ -44,6 +44,9 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_license_secrets",  # reveal a license password on the detail page
         "import_licenses",       # import / add licenses
         "manage_licenses",       # block / mark-broken / redeliver / replace
+        # Phase 6 — V2Ray services.
+        "view_services",         # see v2ray service pages + refresh usage
+        "manage_services",       # provision-retry / disable / enable / delete / reset
     }
 )
 
@@ -73,22 +76,26 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_license_secrets",
             "import_licenses",
             "manage_licenses",
+            "view_services",
+            "manage_services",
         }
     ),
     # Support: view users, block/restrict them, view license status (no secrets,
-    # no import); no settings, wallet, or payments.
+    # no import); view v2ray services + refresh usage; no settings/wallet/payments.
     Role.SUPPORT: frozenset(
         {"view_dashboard", "view_users", "manage_users", "block_users",
-         "restrict_users", "view_licenses"}
+         "restrict_users", "view_licenses", "view_services"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; cannot
     # change bot texts or block/restrict users.
     Role.ACCOUNTANT: frozenset(
         {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
-         "approve_payments", "process_payments", "view_licenses"}
+         "approve_payments", "process_payments", "view_licenses", "view_services"}
     ),
-    # Viewer: read-only dashboard + users + license counts (no secrets).
-    Role.VIEWER: frozenset({"view_dashboard", "view_users", "view_licenses"}),
+    # Viewer: read-only dashboard + users + license/service counts (no secrets).
+    Role.VIEWER: frozenset(
+        {"view_dashboard", "view_users", "view_licenses", "view_services"}
+    ),
 }
 
 
@@ -198,3 +205,11 @@ def can_view_license_secrets(role: object) -> bool:
 
 def can_import_licenses(role: object) -> bool:
     return has_permission(role, "import_licenses")
+
+
+def can_view_services(role: object) -> bool:
+    return has_permission(role, "view_services")
+
+
+def can_manage_services(role: object) -> bool:
+    return has_permission(role, "manage_services")

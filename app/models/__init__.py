@@ -11,6 +11,7 @@ from app.models.xui_inbound import XuiInbound
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.license_item import LicenseItem
+from app.models.v2ray_service import V2RayService
 
 __all__ = [
     "Base",
@@ -25,4 +26,5 @@ __all__ = [
     "Order",
     "Payment",
     "LicenseItem",
+    "V2RayService",
 ]

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.services.detail_title", id=svc.id) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.services.detail_title", id=svc.id) }}</h1>
+  <p class="muted"><a href="/admin/v2ray-services">{{ _("web.services.back") }}</a></p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.services.flash." ~ saved) if saved in ("refreshed","disabled","enabled","deleted","reset","retried") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel">
+  <dl class="kv">
+    <dt>{{ _("web.services.col.status") }}</dt><dd><span class="pill {{ 'ok' if svc.status == 'active' else '' }}">{{ _("service.status." ~ svc.status) }}</span></dd>
+    <dt>{{ _("web.services.order") }}</dt><dd>{% if svc.order_id %}<a href="/admin/orders/{{ svc.order_id }}">#{{ svc.order_id }}</a>{% else %}—{% endif %}</dd>
+    <dt>{{ _("web.services.col.user") }}</dt><dd>{% if svc.user %}{{ svc.user.username or svc.user.telegram_id or ("#" ~ svc.user_id) }}{% else %}—{% endif %}</dd>
+    <dt>{{ _("web.services.col.product") }}</dt><dd>{{ svc.product.title if svc.product else "—" }}</dd>
+    <dt>{{ _("web.services.col.server") }}</dt><dd>{{ svc.xui_server.name if svc.xui_server else "—" }}</dd>
+    <dt>{{ _("web.services.col.inbound") }}</dt><dd>{{ svc.xui_inbound.inbound_id if svc.xui_inbound else "—" }}</dd>
+    <dt>{{ _("web.services.col.email") }}</dt><dd><code>{{ svc.client_email }}</code></dd>
+    <dt>{{ _("web.services.uuid") }}</dt><dd><code>{{ masked_uuid }}</code></dd>
+    <dt>{{ _("web.services.ip_limit") }}</dt><dd>{{ svc.ip_limit or 1 }}</dd>
+    <dt>{{ _("web.services.usage") }}</dt><dd>{{ used_disp }} / {{ total_disp }}</dd>
+    <dt>{{ _("web.services.expiry") }}</dt><dd>{{ svc.expire_at.strftime("%Y-%m-%d %H:%M") if svc.expire_at else "—" }}</dd>
+    <dt>{{ _("web.services.last_sync") }}</dt><dd class="muted">{{ svc.last_traffic_sync_at.strftime("%Y-%m-%d %H:%M") if svc.last_traffic_sync_at else "—" }}</dd>
+    <dt>{{ _("web.services.sub_url") }}</dt>
+    <dd>{% if svc.subscription_url %}<code>{{ svc.subscription_url }}</code>{% else %}<span class="muted">{{ _("web.services.no_sub") }}</span>{% endif %}</dd>
+    {% if svc.qr_code_path %}<dt>{{ _("web.services.qr") }}</dt><dd class="muted small">{{ svc.qr_code_path }}</dd>{% endif %}
+    {% if svc.last_error %}<dt>{{ _("web.services.last_error") }}</dt><dd class="muted">{{ svc.last_error }}</dd>{% endif %}
+  </dl>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.services.actions") }}</h2>
+  <div class="action-row">
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/refresh-usage">
+      <button type="submit" class="btn">📊 {{ _("web.services.action.refresh") }}</button>
+    </form>
+    {% if can_manage %}
+    {% if svc.status == "active" %}
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/disable">
+      <button type="submit" class="btn">⏸ {{ _("web.services.action.disable") }}</button>
+    </form>
+    {% elif svc.status in ("disabled","expired") %}
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/enable">
+      <button type="submit" class="btn">▶️ {{ _("web.services.action.enable") }}</button>
+    </form>
+    {% endif %}
+    {% if svc.status == "failed" and svc.order_id %}
+    <form method="post" action="/admin/orders/{{ svc.order_id }}/retry-v2ray-provisioning">
+      <button type="submit" class="btn">🔁 {{ _("web.services.action.retry") }}</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/reset-traffic">
+      <button type="submit" class="btn">♻️ {{ _("web.services.action.reset") }}</button>
+    </form>
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/delete">
+      <button type="submit" class="btn danger">🗑 {{ _("web.services.action.delete") }}</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
+{% if logs %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.services.col.status") }}</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <tbody>
+        {% for r in logs %}
+        <tr>
+          <td class="muted small">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</td>
+          <td><code>{{ r.action }}</code></td>
+          <td class="muted small">{{ r.meta or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

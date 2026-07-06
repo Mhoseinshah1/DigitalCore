@@ -90,6 +90,48 @@ async def on_admin_licenses(
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.message(Command("admin_v2ray"))
+async def on_admin_v2ray(
+    message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    if not has_permission(role, "view_services"):
+        await message.answer(_("admin.not_authorized"))
+        return
+    from app.services import v2ray_service
+    async with SessionLocal() as session:
+        counts = await v2ray_service.count_by_status(session)
+    total = sum(counts.values())
+    if total == 0:
+        await message.answer(_("admin.services.none"))
+        return
+    await message.answer("\n".join([
+        _("admin.services.title"), "",
+        _("admin.services.counts", active=counts.get("active", 0),
+          failed=counts.get("failed", 0), total=total),
+    ]), parse_mode="HTML")
+
+
+@router.message(Command("admin_v2ray_failed"))
+async def on_admin_v2ray_failed(
+    message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    if not has_permission(role, "view_services"):
+        await message.answer(_("admin.not_authorized"))
+        return
+    from app.services import v2ray_service
+    async with SessionLocal() as session:
+        failed = await v2ray_service.list_services(session, status="failed", limit=20)
+        rows = [((s.order.order_number if s.order else f"#{s.order_id}"), s.last_error or "—")
+                for s in failed]
+    if not rows:
+        await message.answer(_("admin.services.failed_none"))
+        return
+    lines = [_("admin.services.failed_title"), ""]
+    for number, err in rows:
+        lines.append(_("admin.services.failed_row", number=number, error=err))
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 @router.message(Command("admin_users"))
 async def on_admin_users(
     message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None

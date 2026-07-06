@@ -80,8 +80,8 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   Phase 4+.
 - **Phase 4 — done.** **Approval / delivery + receipt-review admin quick actions.**
   An admin reviewing a submitted receipt — in the web panel **or** in Telegram —
-  can **approve** (which delivers: a license code is popped from the product's key
-  pool, or a V2Ray client is provisioned on the bound server/inbound) or **reject
+  can **approve** (which hands the order to the delivery dispatcher — see Phase 5
+  for license delivery and Phase 6 for V2Ray provisioning) or **reject
   with a reason**, and can run user-management actions in the same place: **add /
   subtract wallet balance**, **block**, **restrict** (softer than a block), and
   **view user**. Restricted users can still `/start` and read rules/support but
@@ -94,9 +94,66 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   sold twice), attaches it to the order + buyer, sends the credentials to the user
   in Telegram, and marks the order `delivered`. Users see their licenses with
   `/my_licenses`; admins get stock/sold/low-stock pages, a detail page (password
-  gated by permission), and redeliver/replace/block/mark-broken actions. V2Ray
-  approval is still a placeholder (`provisioning_pending`) — real 3X-UI
-  provisioning and subscription/QR links are **Phase 6**.
+  gated by permission), and redeliver/replace/block/mark-broken actions.
+- **Phase 6 — done.** **Real 3X-UI V2Ray provisioning.** Approving a paid V2Ray
+  order now creates a client on the bound 3X-UI server + inbound, **verifies it
+  after writing**, stores a local `V2RayService`, and delivers the subscription
+  link + QR to the buyer; the order becomes `delivered`. Provisioning is
+  **idempotent** (deterministic client email + unique `order_id` + a held order
+  lock) so an order never gets two clients, and it **retries safely** — a failure
+  keeps the approval, flags the order with a `delivery_error`, and lets an admin
+  retry. Users see `/my_services`; admins get `/admin/v2ray-services`
+  (list/detail + refresh-usage / disable / enable / delete / reset-traffic /
+  retry). **Not** in this phase: renewal / add-traffic, wallet purchase,
+  coupons / referrals / tickets / reports, Marzban / Hiddify adapters.
+
+### Phase 6 — real 3X-UI V2Ray provisioning
+
+**Provision** (`app/services/v2ray_service.py`, `v2ray_services` table): approving
+a V2Ray order calls the dispatcher, which builds a `ClientAdd`
+(`expiryTime` = now + `duration_days` in **ms**, `totalGB` = `traffic_gb` in
+**bytes**, `limitIp` = `ip_limit` or 1), calls `xui_service.add_client`
+(login → addClient → **verify-after-write**), then stores a local
+`V2RayService` (`active`) and marks the order `delivered`. The client email is
+**deterministic** (`dc-u{user}-o{order}`); before adding, we `find_client` on the
+panel so a retry after a partial run **reuses** the existing client instead of
+duplicating it. The order row is locked `FOR UPDATE` for the whole operation
+(no intermediate commit) so two concurrent provisions serialize — the loser sees
+the active service and returns it. `order_id` is unique in `v2ray_services` as a
+DB backstop.
+
+**Subscription + QR** — a subscription URL is built **only** when an admin has set
+the server's `public_sub_base_url` (+ optional `subscription_path`, default
+`/sub/`); otherwise it is left null and the user is told support will follow up
+(we never leak the private admin base URL). When a URL exists a QR PNG is written
+under `storage/exports/qrcodes/<id>.png` (`qrcode[pil]`, imported lazily — a
+missing lib degrades to text-only, never a crash).
+
+**Failure / retry** — a failure (server/inbound missing or inactive, auth error,
+verify mismatch) never rolls back the approval: the order stays
+`approved`/`provisioning_pending` with a safe `delivery_error`, the service row is
+`failed`, and an admin retries from the service or `POST
+/admin/orders/{id}/retry-v2ray-provisioning`. A Telegram send failure does **not**
+fail provisioning (the client already exists; the user re-fetches via
+`/my_services`).
+
+| Area | Routes / commands |
+|------|-------------------|
+| Web list/detail | `GET /admin/v2ray-services` (status filter), `GET /admin/v2ray-services/{id}` |
+| Web actions | `POST …/{id}/{refresh-usage,disable,enable,delete,reset-traffic}`, `POST /admin/orders/{id}/retry-v2ray-provisioning` |
+| Bot user | `/my_services` (My Services) — own services only, re-send link + QR |
+| Bot admin | `/admin_v2ray`, `/admin_v2ray_failed` — counts + failed list |
+
+**Security / permissions**: no XUI password/token/cookie is ever stored, logged,
+or rendered; the client UUID is masked on the detail page. `view_services`
+(owner/admin/support/accountant/viewer) sees pages + refresh; `manage_services`
+(owner/admin) runs disable/enable/delete/reset/retry. Audited:
+`v2ray_provision_started/_retry`, `v2ray_client_created/_verified`,
+`v2ray_provision_failed`, `v2ray_service_delivered`,
+`v2ray_service_user_notified/_notification_failed`,
+`v2ray_service_usage_refreshed`, `v2ray_service_disabled/_enabled/_deleted`,
+`v2ray_traffic_reset`. A DB-only worker sweep marks expired services `expired`
+(no panel calls, so it can never spam a server).
 
 ### Phase 5 — license stock & real license delivery
 
@@ -149,8 +206,9 @@ sets `rejected` with the required reason.
   (`app/services/license_service.py`, `license_keys` table) into
   `order.delivered_payload` and marks the order `delivered`. Empty pool → the
   order stays `approved` and the admin is told to stock keys.
-- *v2ray* → provisions a client on the bound 3X-UI server/inbound via
-  `xui_service.add_client`; on failure the order stays `approved`.
+- *v2ray* → **in Phase 4** this only parked the order at `provisioning_pending`
+  (no client was created). Real 3X-UI provisioning arrives in **Phase 6**
+  (`v2ray_service.provision_service_for_order`).
 
 **Receipt-review quick actions** — permission-gated, from `/admin/orders/{id}`,
 the pending-receipts list, and (mirrored) `/admin/users/{id}`:
@@ -521,6 +579,26 @@ rows (idempotent; never overwrites custom values).
    license; **redeliver** re-sends the same one.
 7. Confirm **Licenses → Low stock** warns when available drops below the threshold,
    and that no license password appears in the audit log.
+
+## Phase 6 manual test checklist
+
+1. Log in; under **V2Ray / 3X-UI** add (or reuse) a server, **test connection**,
+   and **sync** (or add) an inbound.
+2. Optionally set the server's **public subscription host** so subscription links
+   can be built (otherwise the service is delivered without a link).
+3. Create an active **V2Ray** product bound to that server + inbound (with
+   duration, traffic, IP-limit).
+4. In the bot, buy the product, submit a receipt, and **approve** it.
+5. Confirm a client is created on the correct server/inbound, **verify-after-write**
+   succeeds, a `V2RayService` row exists, and the order becomes `delivered`.
+6. Confirm the buyer receives the subscription link (+ QR if configured) in
+   Telegram, and `/my_services` shows the service and can re-send the link.
+7. Confirm **Admin → V2Ray Services** lists it; open the detail page and confirm
+   **no XUI credentials** appear and the UUID is masked.
+8. Re-approve / retry the same order and confirm **no duplicate** client is created.
+9. Disable / enable / reset-traffic / refresh-usage from the detail page (with
+   `manage_services`); confirm a `viewer` is blocked from those actions.
+10. Confirm audit rows exist for provisioning and do not leak the panel password.
 
 ## Environment
 

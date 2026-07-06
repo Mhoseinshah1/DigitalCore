@@ -2,8 +2,10 @@
 
 - license → the real license delivery (reserve + sell + send credentials); the
   order becomes `delivered` on success (see license_service).
-- v2ray → placeholder only: the order is parked at `provisioning_pending`; no
-  3X-UI client is created yet (Phase 6).
+- v2ray → real 3X-UI provisioning (Phase 6): create + verify a panel client,
+  store a V2RayService, deliver the subscription link + QR; the order becomes
+  `delivered` on success. On failure it stays approved/provisioning_pending with
+  a safe delivery_error so an admin can retry (see v2ray_service).
 
 Never raises — a delivery failure must not undo an approval.
 """
@@ -15,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
-from app.services import audit_service, license_service
+from app.services import license_service, v2ray_service
 
 log = logging.getLogger("delivery")
 
@@ -42,13 +44,21 @@ async def deliver_order(
             return {"ok": False, "delivered": False, "reason": exc.code}
 
     if product.type == "v2ray":
-        # Placeholder: no client creation yet — park at provisioning_pending.
-        order.status = "provisioning_pending"
-        await audit_service.log(
-            session, actor_type="admin", actor_id=actor_id,
-            action="order_provisioning_pending", target_type="order", target_id=order.id,
-            new=f"number={order.order_number}",
-        )
-        return {"ok": True, "delivered": False, "reason": "provisioning_pending"}
+        try:
+            result = await v2ray_service.provision_service_for_order(
+                session, order.id, actor_id=actor_id, bot=bot
+            )
+        except v2ray_service.V2RayError as exc:
+            log.warning("V2Ray provisioning error for order %s: %s", order.order_number, exc)
+            return {"ok": False, "delivered": False, "reason": exc.code}
+        # Normalize to the dispatcher's {ok, delivered, reason} shape.
+        return {
+            "ok": result.get("ok", False),
+            "delivered": bool(result.get("provisioned")),
+            "reason": result.get("reason",
+                                 "provisioned" if result.get("provisioned") else "failed"),
+            "service_id": result.get("service_id"),
+            "already": result.get("already", False),
+        }
 
     return {"ok": False, "delivered": False, "reason": "unknown_type"}

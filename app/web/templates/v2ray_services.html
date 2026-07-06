@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.services.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.services.title") }}</h1>
+  <p class="muted">{{ _("web.services.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.services.flash." ~ saved) if saved in ("refreshed","disabled","enabled","deleted","reset","retried") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form method="get" action="/admin/v2ray-services" class="inline-form" style="margin-bottom:1rem">
+  <select name="status">
+    <option value="">{{ _("web.services.all_statuses") }}</option>
+    {% for s in ("provisioning","active","disabled","expired","deleted","failed") %}
+    <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ _("service.status." ~ s) }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn">{{ _("web.services.filter") }}</button>
+</form>
+
+{% if not rows %}
+<section class="note"><p class="muted">{{ _("web.services.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.services.col.id") }}</th>
+        <th>{{ _("web.services.col.user") }}</th>
+        <th>{{ _("web.services.col.product") }}</th>
+        <th>{{ _("web.services.col.server") }}</th>
+        <th>{{ _("web.services.col.inbound") }}</th>
+        <th>{{ _("web.services.col.email") }}</th>
+        <th>{{ _("web.services.col.status") }}</th>
+        <th>{{ _("web.services.col.usage") }}</th>
+        <th>{{ _("web.services.col.expire") }}</th>
+        <th>{{ _("web.services.col.actions") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>#{{ r.id }}</td>
+          <td>{{ r.user_label }}</td>
+          <td>{{ r.product_title }}</td>
+          <td>{{ r.server_name }}</td>
+          <td>{{ r.inbound }}</td>
+          <td><code>{{ r.client_email }}</code></td>
+          <td><span class="pill {{ 'ok' if r.status == 'active' else '' }}">{{ _("service.status." ~ r.status) }}</span></td>
+          <td class="muted small">{{ r.used_disp }} / {{ r.total_disp }}</td>
+          <td class="muted small">{{ r.expire_at.strftime("%Y-%m-%d") if r.expire_at else "—" }}</td>
+          <td class="actions"><a class="btn small" href="/admin/v2ray-services/{{ r.id }}">{{ _("web.services.view") }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

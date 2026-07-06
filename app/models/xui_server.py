@@ -45,6 +45,13 @@ class XuiServer(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False
     )
+
+    # Optional public subscription host + path (Phase 6). The panel's
+    # subscription service usually listens on a different host/port/path than
+    # the admin API, so we never guess it from base_url. Null until an admin
+    # sets it; without it a service's subscription_url is left null.
+    public_sub_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subscription_path: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_health_check: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
