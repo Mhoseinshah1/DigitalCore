@@ -113,6 +113,9 @@ async def bot_db(monkeypatch, tmp_path):
 async def _seed_product(maker, *, card="6037-0000-0000-0000") -> int:
     async with maker() as s:
         s.add(Setting(key="card_number", value=card))
+        # These tests isolate the card-to-card flow; wallet payment is exercised
+        # in tests/test_wallet_bot.py, so turn it off here to bypass the picker.
+        s.add(Setting(key="wallet_payment_enabled", value="false"))
         p = Product(type="license", title="Gold Key", price=120000,
                     is_active=True, is_hidden=False)
         s.add(p)
@@ -125,7 +128,7 @@ async def test_buy_creates_order_and_shows_instructions(bot_db) -> None:
     msg = FakeMessage(FakeUser(4001))
     cb = FakeCallback(f"ubuy:{pid}", FakeUser(4001), msg)
     state = FakeState()
-    await on_buy(cb, FA, state, lang="fa")
+    await on_buy(cb, FakeBot(), FA, state, lang="fa")
 
     body = "\n".join(msg.answers)
     assert "DC-" in body  # order number shown
@@ -141,7 +144,7 @@ async def test_buy_blocks_when_card_not_configured(bot_db) -> None:
     pid = await _seed_product(bot_db, card="")  # empty card number
     msg = FakeMessage(FakeUser(4002))
     cb = FakeCallback(f"ubuy:{pid}", FakeUser(4002), msg)
-    await on_buy(cb, FA, FakeState(), lang="fa")
+    await on_buy(cb, FakeBot(), FA, FakeState(), lang="fa")
     assert msg.answers == [FA("purchase.not_configured")]
 
 
@@ -151,7 +154,7 @@ async def test_receipt_submission_flow(bot_db) -> None:
     # Buy first.
     buy_msg = FakeMessage(buyer)
     state = FakeState()
-    await on_buy(FakeCallback(f"ubuy:{pid}", buyer, buy_msg), FA, state, lang="fa")
+    await on_buy(FakeCallback(f"ubuy:{pid}", buyer, buy_msg), FakeBot(), FA, state, lang="fa")
 
     # Now send a photo receipt (state carries order_id).
     photo_msg = FakeMessage(buyer, photo=[FakePhoto("bigfile", 2048)])
@@ -181,7 +184,7 @@ async def test_receipt_without_pending_order_is_helpful(bot_db) -> None:
 async def test_orders_list_shows_user_orders(bot_db) -> None:
     pid = await _seed_product(bot_db)
     buyer = FakeUser(4005)
-    await on_buy(FakeCallback(f"ubuy:{pid}", buyer, FakeMessage(buyer)), FA, FakeState(), lang="fa")
+    await on_buy(FakeCallback(f"ubuy:{pid}", buyer, FakeMessage(buyer)), FakeBot(), FA, FakeState(), lang="fa")
 
     msg = FakeMessage(buyer)
     await on_orders(msg, FA, FakeState(), lang="fa")

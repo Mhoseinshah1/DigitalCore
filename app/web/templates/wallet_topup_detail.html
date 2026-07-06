@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.wallet.topup.detail_title", id=topup.id) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.wallet.topup.detail_title", id=topup.id) }}</h1>
+  <p class="muted"><a href="/admin/wallet/topups">{{ _("web.wallet.back") }}</a></p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.wallet.flash." ~ saved) if saved in ("approved","rejected") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel">
+  <dl class="kv">
+    <dt>{{ _("web.wallet.col.user") }}</dt><dd>{% if topup.user %}{{ topup.user.username or topup.user.telegram_id or ("#" ~ topup.user_id) }}{% else %}#{{ topup.user_id }}{% endif %}</dd>
+    <dt>{{ _("web.wallet.col.amount") }}</dt><dd>{{ "{:,}".format(topup.amount) }}</dd>
+    <dt>{{ _("web.wallet.col.status") }}</dt><dd><span class="pill {{ 'ok' if topup.status == 'approved' else '' }}">{{ status_label }}</span></dd>
+    <dt>{{ _("web.wallet.col.submitted") }}</dt><dd class="muted">{{ topup.submitted_at.strftime("%Y-%m-%d %H:%M") if topup.submitted_at else "—" }}</dd>
+    <dt>{{ _("web.wallet.topup.receipt") }}</dt>
+    <dd>{% if topup.receipt_path %}<a href="/admin/wallet/receipts/{{ topup.id }}" target="_blank">{{ topup.receipt_original_name or _("web.wallet.topup.receipt") }}</a>{% else %}<span class="muted">{{ _("web.wallet.topup.no_receipt") }}</span>{% endif %}</dd>
+    {% if topup.reject_reason %}<dt>{{ _("web.wallet.topup.reject_reason") }}</dt><dd>{{ topup.reject_reason }}</dd>{% endif %}
+  </dl>
+</section>
+
+{% if can_manage and topup.status == "waiting_admin" %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.licenses.actions") }}</h2>
+  <div class="action-row">
+    <form method="post" action="/admin/wallet/topups/{{ topup.id }}/approve">
+      <button type="submit" class="btn">✅ {{ _("web.wallet.topup.approve") }}</button>
+    </form>
+    <form method="post" action="/admin/wallet/topups/{{ topup.id }}/reject" class="inline-form">
+      <input type="text" name="reason" placeholder="{{ _('web.wallet.topup.reason_placeholder') }}" required>
+      <button type="submit" class="btn danger">❌ {{ _("web.wallet.topup.reject") }}</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.wallet.topups.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.wallet.topups.pending_title") if pending_only else _("web.wallet.topups.title") }}</h1>
+  <p class="muted">{{ _("web.wallet.topups.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.wallet.flash." ~ saved) if saved in ("approved","rejected","refunded") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if not pending_only %}
+<form method="get" action="/admin/wallet/topups" class="inline-form" style="margin-bottom:1rem">
+  <select name="status">
+    <option value="">{{ _("web.wallet.all_statuses") }}</option>
+    {% for s in ("pending_receipt","waiting_admin","approved","rejected","cancelled","failed") %}
+    <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ _("topup.status." ~ s) }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn">{{ _("web.wallet.filter") }}</button>
+</form>
+{% endif %}
+
+{% if not rows %}
+<section class="note"><p class="muted">{{ _("web.wallet.topups.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.wallet.col.id") }}</th>
+        <th>{{ _("web.wallet.col.user") }}</th>
+        <th>{{ _("web.wallet.col.amount") }}</th>
+        <th>{{ _("web.wallet.col.status") }}</th>
+        <th>{{ _("web.wallet.col.submitted") }}</th>
+        <th>{{ _("web.wallet.col.actions") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>#{{ r.id }}</td>
+          <td>{{ r.user_label }}</td>
+          <td>{{ "{:,}".format(r.amount) }}</td>
+          <td><span class="pill {{ 'ok' if r.status == 'approved' else '' }}">{{ r.status_label }}</span></td>
+          <td class="muted small">{{ r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "—" }}</td>
+          <td class="actions"><a class="btn small" href="/admin/wallet/topups/{{ r.id }}">{{ _("web.wallet.view") }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

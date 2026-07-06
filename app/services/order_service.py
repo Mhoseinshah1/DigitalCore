@@ -63,8 +63,8 @@ async def create_order(
     purchasable, its price is invalid, or a V2Ray product lacks its XUI binding.
     Nothing is delivered here.
     """
-    if payment_method != "card_to_card":
-        raise OrderError("only card-to-card is supported", code="method_unsupported")
+    if payment_method not in ("card_to_card", "wallet"):
+        raise OrderError("unsupported payment method", code="method_unsupported")
 
     product = await session.get(Product, product_id)
     if product is None:
@@ -75,8 +75,13 @@ async def create_order(
     svc = SettingsService(session)
     if not await svc.get_bool("sales_enabled", True):
         raise OrderError("sales are disabled", code="sales_disabled")
-    if not await svc.get_bool("card_to_card_enabled", True):
+    if payment_method == "card_to_card" and not await svc.get_bool("card_to_card_enabled", True):
         raise OrderError("card-to-card is disabled", code="card_disabled")
+    if payment_method == "wallet" and not (
+        await svc.get_bool("wallet_enabled", True)
+        and await svc.get_bool("wallet_payment_enabled", True)
+    ):
+        raise OrderError("wallet payment is disabled", code="wallet_disabled")
 
     price = int(product.price or 0)
     if price <= 0:

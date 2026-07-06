@@ -31,6 +31,7 @@ from app.services import (
     payment_service,
     product_service,
     user_service,
+    wallet_service,
 )
 from app.services.order_service import OrderError
 from app.services.payment_service import ReceiptError, ReceiptFile
@@ -90,24 +91,21 @@ def _payment_instruction_lines(order, product, cfg: dict[str, str], _: Callable[
     return lines
 
 
-@router.callback_query(F.data.startswith(CB_BUY))
-async def on_buy(
-    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
-) -> None:
-    """Create the order + payment and show card-to-card instructions."""
-    product_id = int((callback.data or "0")[len(CB_BUY):])
-    # callback.message is a Message (or InaccessibleMessage) for button presses;
-    # both support .answer(). Only None for some inline cases.
-    reply = callback.message
-    tg_user = callback.from_user
+CB_PAY_CARD = "upayc:"
+CB_PAY_WALLET = "upayw:"
 
+
+async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., str],
+                              state: FSMContext) -> None:
+    """Create the card-to-card order + payment and show the transfer instructions.
+
+    Unchanged Phase 3 flow, extracted so the payment-method picker can reuse it.
+    """
     async with SessionLocal() as session:
         svc = SettingsService(session)
-        if not await svc.get_bool("sales_enabled", True):
-            await callback.answer(_("purchase.sales_disabled"), show_alert=True)
-            return
         if not await svc.get_bool("card_to_card_enabled", True):
-            await callback.answer(_("purchase.card_disabled"), show_alert=True)
+            if reply is not None:
+                await reply.answer(_("purchase.card_disabled"))
             return
         cfg = {
             "card_number": (await svc.get_str("card_number", "")).strip(),
@@ -116,7 +114,6 @@ async def on_buy(
             "payment_instructions": (await svc.get_str("payment_instructions", "")).strip(),
         }
         if not cfg["card_number"]:
-            await callback.answer()
             if reply is not None:
                 await reply.answer(_("purchase.not_configured"))
             return
@@ -126,25 +123,136 @@ async def on_buy(
             first_name=tg_user.first_name, last_name=tg_user.last_name,
         )
         await session.commit()
-
         try:
             order = await order_service.create_order(session, user.id, product_id)
-            payment = await payment_service.create_payment_for_order(session, order)
+            await payment_service.create_payment_for_order(session, order)
             await session.commit()
         except OrderError as exc:
-            await callback.answer()
             if reply is not None:
                 await reply.answer(_order_error_text(exc, _))
             return
-
         product = await product_service.get(session, product_id)
         lines = _payment_instruction_lines(order, product, cfg, _)
+        order_id = order.id
 
     await state.set_state(PurchaseStates.waiting_for_receipt)
-    await state.update_data(order_id=order.id)
-    await callback.answer()
+    await state.update_data(order_id=order_id)
     if reply is not None:
         await reply.answer("\n".join(lines), parse_mode="HTML")
+
+
+def _topup_button(_: Callable[..., str]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=_("wallet.btn.topup"), callback_data="wtopup")],
+    ])
+
+
+async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str], bot) -> None:
+    """Charge the wallet for the product, then run the existing delivery flow."""
+    async with SessionLocal() as session:
+        user, _created = await user_service.create_or_update_from_telegram(
+            session, telegram_id=tg_user.id, username=tg_user.username,
+            first_name=tg_user.first_name, last_name=tg_user.last_name,
+        )
+        await session.commit()
+        product = await product_service.get(session, product_id)
+        if product is None:
+            if reply is not None:
+                await reply.answer(_("purchase.error", error="product"))
+            return
+        price = int(product.price or 0)
+        balance = await wallet_service.get_balance(session, user.id)
+        if balance < price:
+            if reply is not None:
+                await reply.answer(
+                    _("purchase.wallet.insufficient", balance=f"{balance:,}", amount=f"{price:,}"),
+                    reply_markup=_topup_button(_))
+            return
+        try:
+            order = await order_service.create_order(
+                session, user.id, product_id, payment_method="wallet")
+            await session.commit()
+        except OrderError as exc:
+            if reply is not None:
+                await reply.answer(_order_error_text(exc, _))
+            return
+        try:
+            result = await wallet_service.pay_order_with_wallet(
+                session, order.id, user.id, bot=bot)
+            await session.commit()
+        except wallet_service.InsufficientBalanceError:
+            await session.rollback()
+            bal = await wallet_service.get_balance(session, user.id)
+            if reply is not None:
+                await reply.answer(
+                    _("purchase.wallet.insufficient", balance=f"{bal:,}", amount=f"{price:,}"),
+                    reply_markup=_topup_button(_))
+            return
+        except wallet_service.WalletError as exc:
+            await session.rollback()
+            if reply is not None:
+                await reply.answer(_("purchase.error", error=str(exc)))
+            return
+        order2 = await order_service.get_order(session, order.id)
+        new_balance = result.get("balance", 0)
+        delivered = bool(result.get("delivery", {}).get("delivered"))
+        number, title = order2.order_number, product.title
+
+    if reply is not None:
+        key = "purchase.wallet.paid_delivered" if delivered else "purchase.wallet.paid_pending"
+        await reply.answer(_(key, number=number, title=title, balance=f"{new_balance:,}"),
+                           parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith(CB_BUY))
+async def on_buy(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """Offer the payment-method picker, or go straight to the only enabled method."""
+    product_id = int((callback.data or "0")[len(CB_BUY):])
+    reply = callback.message
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not await svc.get_bool("sales_enabled", True):
+            await callback.answer(_("purchase.sales_disabled"), show_alert=True)
+            return
+        card_ok = (await svc.get_bool("card_to_card_enabled", True)
+                   and bool((await svc.get_str("card_number", "")).strip()))
+        wallet_ok = (await svc.get_bool("wallet_enabled", True)
+                     and await svc.get_bool("wallet_payment_enabled", True))
+    await callback.answer()
+    if wallet_ok and card_ok:
+        if reply is not None:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=_("purchase.method.card"),
+                                      callback_data=f"{CB_PAY_CARD}{product_id}")],
+                [InlineKeyboardButton(text=_("purchase.method.wallet"),
+                                      callback_data=f"{CB_PAY_WALLET}{product_id}")],
+            ])
+            await reply.answer(_("purchase.choose_method"), reply_markup=kb)
+        return
+    if wallet_ok:
+        await _pay_with_wallet(reply, callback.from_user, product_id, _, bot)
+        return
+    await _start_card_payment(reply, callback.from_user, product_id, _, state)
+
+
+@router.callback_query(F.data.startswith(CB_PAY_CARD))
+async def on_pay_card(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_PAY_CARD):])
+    await callback.answer()
+    await _start_card_payment(callback.message, callback.from_user, product_id, _, state)
+
+
+@router.callback_query(F.data.startswith(CB_PAY_WALLET))
+async def on_pay_wallet(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_PAY_WALLET):])
+    await callback.answer()
+    await _pay_with_wallet(callback.message, callback.from_user, product_id, _, bot)
 
 
 async def _download_telegram_file(bot: Bot, file_id: str) -> bytes:

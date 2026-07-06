@@ -323,7 +323,9 @@ async def adjust_wallet_balance(
     amount = int(amount)
     if amount == 0:
         raise ValueError("amount must be non-zero")
-    user = await get_by_id(session, user_id)
+    # Lock the user row for the read-modify-write (real lock on Postgres, no-op
+    # on SQLite) so concurrent adjustments cannot lose an update.
+    user = await session.scalar(select(User).where(User.id == user_id).with_for_update())
     if user is None:
         raise ValueError("user not found")
 

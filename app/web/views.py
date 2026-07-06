@@ -33,7 +33,12 @@ from app.i18n import SUPPORTED, is_rtl, normalize_lang, t
 from app.models.admin import Admin
 from app.models.payment import Payment
 from app.models.product import PRODUCT_TYPES, Product
-from app.core.statuses import order_status_label, payment_status_label
+from app.core.statuses import (
+    order_status_label,
+    payment_status_label,
+    topup_status_label,
+    wallet_tx_type_label,
+)
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
@@ -133,6 +138,15 @@ NAV_TREE: list[dict] = [
          "href": "/admin/v2ray-services?status=active", "permission": "view_services"},
         {"label_key": "nav.services.failed", "icon": "⚠️",
          "href": "/admin/v2ray-services?status=failed", "permission": "view_services"},
+    ]},
+
+    {"label_key": "nav.wallet", "icon": "💰", "children": [
+        {"label_key": "nav.wallet.topups", "icon": "🧾", "href": "/admin/wallet/topups",
+         "permission": "view_wallet_topups"},
+        {"label_key": "nav.wallet.pending", "icon": "⏳",
+         "href": "/admin/wallet/topups/pending", "permission": "view_wallet_topups"},
+        {"label_key": "nav.wallet.transactions", "icon": "📊",
+         "href": "/admin/wallet/transactions", "permission": "view_wallet_topups"},
     ]},
 
     {"label_key": "nav.payments", "icon": "💳", "children": [
@@ -1375,6 +1389,7 @@ def _order_action_perms(role: object) -> dict:
         "can_block": has_permission(role, "block_users"),
         "can_restrict": has_permission(role, "restrict_users"),
         "can_view_users": has_permission(role, "view_users"),
+        "can_refund": has_permission(role, "refund_payments"),
     }
 
 
@@ -2106,3 +2121,208 @@ async def order_retry_v2ray(
     if result.get("ok"):
         return _order_back(order_id, saved="approved")
     return _order_back(order_id, error=f"v2ray:{result.get('reason', 'failed')}")
+
+
+# --------------------------------------------------------------------------
+# Wallet (Phase 7) — top-up requests, approve/reject, transactions, refund.
+#
+# List/detail/transactions need `view_wallet_topups`; approve/reject need
+# `manage_wallet_topups`; refund needs `refund_payments`. Top-up receipts are
+# served to authenticated admins only, guarding path traversal.
+# --------------------------------------------------------------------------
+def _topup_row(topup, lang: str) -> dict:
+    user = topup.user
+    return {
+        "id": topup.id,
+        "user_label": (user.username or (user.telegram_id and str(user.telegram_id))
+                       or f"#{topup.user_id}") if user else f"#{topup.user_id}",
+        "amount": topup.amount,
+        "status": topup.status,
+        "status_label": topup_status_label(topup.status, lang),
+        "submitted_at": topup.submitted_at,
+        "admin_id": topup.admin_id,
+        "has_receipt": bool(topup.receipt_path),
+    }
+
+
+@router.get("/wallet/topups/pending", response_class=HTMLResponse)
+async def wallet_topups_pending_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_wallet_topups")
+    if deny:
+        return deny
+    topups = await wallet_service.list_pending_topups(session, limit=200)
+    rows = [_topup_row(t, lang) for t in topups]
+    return templates.TemplateResponse(
+        "wallet_topups.html",
+        _ctx(request, admin, rows=rows, pending_only=True, status="", saved="", error=""),
+    )
+
+
+@router.get("/wallet/topups", response_class=HTMLResponse)
+async def wallet_topups_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    status: str = "",
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_wallet_topups")
+    if deny:
+        return deny
+    topups = await wallet_service.list_topups(session, status=(status or None), limit=200)
+    rows = [_topup_row(t, lang) for t in topups]
+    return templates.TemplateResponse(
+        "wallet_topups.html",
+        _ctx(request, admin, rows=rows, pending_only=False, status=status,
+             saved=saved, error=error),
+    )
+
+
+@router.get("/wallet/transactions", response_class=HTMLResponse)
+async def wallet_transactions_all_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_wallet_topups")
+    if deny:
+        return deny
+    txns = await user_service.list_wallet_transactions(session, limit=200)
+    labels: dict[int, str] = {}
+    for uid in {t.user_id for t in txns}:
+        u = await user_service.get_by_id(session, uid)
+        if u is not None:
+            labels[uid] = u.username or (u.telegram_id and str(u.telegram_id)) or f"#{u.id}"
+    rows = [{
+        "user_label": labels.get(t.user_id, f"#{t.user_id}"),
+        "type_label": wallet_tx_type_label(t.type, lang),
+        "amount": t.amount,
+        "balance_after": t.balance_after,
+        "reason": t.reason,
+        "created_at": t.created_at,
+    } for t in txns]
+    return templates.TemplateResponse(
+        "wallet_all_transactions.html", _ctx(request, admin, rows=rows),
+    )
+
+
+@router.get("/wallet/topups/{topup_id}", response_class=HTMLResponse)
+async def wallet_topup_detail_page(
+    topup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_wallet_topups")
+    if deny:
+        return deny
+    topup = await wallet_service.get_topup(session, topup_id)
+    if topup is None:
+        return RedirectResponse("/admin/wallet/topups", status_code=302)
+    return templates.TemplateResponse(
+        "wallet_topup_detail.html",
+        _ctx(request, admin, topup=topup, status_label=topup_status_label(topup.status, lang),
+             can_manage=has_permission(admin.role, "manage_wallet_topups"),
+             saved=saved, error=error),
+    )
+
+
+def _topup_back(topup_id: int, *, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/wallet/topups/{topup_id}?{q}", status_code=303)
+
+
+@router.post("/wallet/topups/{topup_id}/approve")
+async def wallet_topup_approve(
+    topup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_wallet_topups")
+    if deny:
+        return deny
+    try:
+        await wallet_service.approve_topup(session, topup_id, admin_id=admin.id)
+        await session.commit()
+    except wallet_service.WalletError as exc:
+        return _topup_back(topup_id, error=str(exc))
+    return _topup_back(topup_id, saved="approved")
+
+
+@router.post("/wallet/topups/{topup_id}/reject")
+async def wallet_topup_reject(
+    topup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_wallet_topups")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    try:
+        await wallet_service.reject_topup(session, topup_id, admin_id=admin.id, reason=reason)
+        await session.commit()
+    except wallet_service.WalletError as exc:
+        return _topup_back(topup_id, error=str(exc))
+    return _topup_back(topup_id, saved="rejected")
+
+
+@router.get("/wallet/receipts/{topup_id}")
+async def wallet_receipt_file(
+    topup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a top-up receipt to authenticated admins only, guarding traversal."""
+    lang, deny = _guard(request, admin, "view_wallet_topups")
+    if deny:
+        return deny
+    topup = await wallet_service.get_topup(session, topup_id)
+    if topup is None or not topup.receipt_path:
+        return HTMLResponse(t("web.receipts.not_found", lang), status_code=404)
+    resolved = payment_service.resolve_receipt_path(topup.receipt_path)
+    if resolved is None:
+        return HTMLResponse(t("web.receipts.not_found", lang), status_code=404)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="admin_viewed_topup_receipt",
+        target_type="wallet_topup", target_id=topup.id,
+    )
+    filename = topup.receipt_original_name or resolved.name
+    return FileResponse(
+        resolved,
+        media_type=topup.receipt_mime_type or "application/octet-stream",
+        filename=filename, content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/orders/{order_id}/refund")
+async def order_refund(
+    order_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "refund_payments")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    try:
+        await wallet_service.refund_wallet_payment(
+            session, order_id, admin_id=admin.id, reason=reason)
+        await session.commit()
+    except wallet_service.WalletError as exc:
+        return _order_back(order_id, error=str(exc))
+    return _order_back(order_id, saved="refunded")

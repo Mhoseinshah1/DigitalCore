@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.wallet.tx.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.wallet.tx.title") }}</h1>
+  <p class="muted">{{ _("web.wallet.tx.subtitle") }}</p>
+</header>
+
+{% if not rows %}
+<section class="note"><p class="muted">{{ _("web.wallet.tx.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.wallet.tx.col.user") }}</th>
+        <th>{{ _("web.wallet.tx.col.type") }}</th>
+        <th>{{ _("web.wallet.tx.col.amount") }}</th>
+        <th>{{ _("web.wallet.tx.col.balance") }}</th>
+        <th>{{ _("web.wallet.tx.col.reason") }}</th>
+        <th>{{ _("web.wallet.tx.col.when") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.user_label }}</td>
+          <td>{{ r.type_label }}</td>
+          <td class="{{ 'ok' if r.amount >= 0 else 'danger' }}">{{ "{:+,}".format(r.amount) }}</td>
+          <td>{{ "{:,}".format(r.balance_after) }}</td>
+          <td class="muted small">{{ r.reason or "—" }}</td>
+          <td class="muted small">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

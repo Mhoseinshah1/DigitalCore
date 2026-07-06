@@ -12,6 +12,7 @@ from app.models.order import Order
 from app.models.payment import Payment
 from app.models.license_item import LicenseItem
 from app.models.v2ray_service import V2RayService
+from app.models.wallet_topup import WalletTopupRequest
 
 __all__ = [
     "Base",
@@ -27,4 +28,5 @@ __all__ = [
     "Payment",
     "LicenseItem",
     "V2RayService",
+    "WalletTopupRequest",
 ]

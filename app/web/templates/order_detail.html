@@ -58,6 +58,15 @@
   </div>
   {% endif %}
 
+  {% if perms.can_refund and not order.refunded_at %}
+  <div class="action-row">
+    <form method="post" action="/admin/orders/{{ order.id }}/refund" class="inline-form">
+      <input type="text" name="reason" placeholder="{{ _('web.order.refund_reason') }}" required>
+      <button type="submit" class="btn danger">↩️ {{ _("web.order.refund") }}</button>
+    </form>
+  </div>
+  {% endif %}
+
   <div class="action-row">
     {% if perms.can_block and user and not user.is_blocked %}
     <form method="post" action="/admin/orders/{{ order.id }}/block-user" class="inline-form">

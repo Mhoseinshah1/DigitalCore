@@ -107,11 +107,15 @@ async def test_cannot_order_v2ray_without_binding(db_session) -> None:
     assert ei.value.code == "product_misconfigured"
 
 
-async def test_only_card_to_card_supported(db_session) -> None:
+async def test_supported_payment_methods(db_session) -> None:
     u = await _user(db_session)
     p = await _license(db_session)
+    # Phase 7: wallet is now a valid payment method.
+    order = await order_service.create_order(db_session, u.id, p.id, payment_method="wallet")
+    assert order.payment_method == "wallet"
+    # An unimplemented method is still refused.
     with pytest.raises(OrderError) as ei:
-        await order_service.create_order(db_session, u.id, p.id, payment_method="wallet")
+        await order_service.create_order(db_session, u.id, p.id, payment_method="gateway")
     assert ei.value.code == "method_unsupported"
 
 

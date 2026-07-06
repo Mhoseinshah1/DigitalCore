@@ -8,6 +8,7 @@ from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import products as admin_products
 from app.bot.handlers.admin import receipt_actions as admin_receipt_actions
 from app.bot.handlers.admin import settings as admin_settings
+from app.bot.handlers.admin import wallet as admin_wallet
 from app.bot.handlers.admin import xui as admin_xui
 from app.bot.handlers.user import language as user_language
 from app.bot.handlers.user import orders as user_orders
@@ -15,6 +16,7 @@ from app.bot.handlers.user import products as user_products
 from app.bot.handlers.user import rules as user_rules
 from app.bot.handlers.user import services as user_services
 from app.bot.handlers.user import start as user_start
+from app.bot.handlers.user import wallet as user_wallet
 from app.bot.middlewares.activity import ActivityMiddleware
 from app.bot.middlewares.admin import AdminMiddleware
 from app.bot.middlewares.blocked import BlockedMiddleware
@@ -48,10 +50,14 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin_products.router)
     dp.include_router(admin_xui.router)
     dp.include_router(admin_receipt_actions.router)
+    dp.include_router(admin_wallet.router)
     dp.include_router(user_language.router)
     dp.include_router(user_start.router)
     dp.include_router(user_rules.router)
     dp.include_router(user_products.router)
+    # Wallet before orders: the top-up receipt state handler must win over the
+    # orders stateless receipt handler.
+    dp.include_router(user_wallet.router)
     dp.include_router(user_orders.router)
     dp.include_router(user_services.router)
     return dp

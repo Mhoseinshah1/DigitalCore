@@ -106,6 +106,58 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   (list/detail + refresh-usage / disable / enable / delete / reset-traffic /
   retry). **Not** in this phase: renewal / add-traffic, wallet purchase,
   coupons / referrals / tickets / reports, Marzban / Hiddify adapters.
+- **Phase 7 — done.** **Wallet top-up + wallet payment.** The wallet is now a
+  real payment method. Users top up by card-to-card (amount → receipt → admin
+  review → credit), pay for orders straight from their balance (which runs the
+  same delivery dispatcher, so a license/V2Ray order is fulfilled immediately),
+  and see `/wallet` + history. Every balance change **locks the user row** and
+  writes a `WalletTransaction` (balance_before/after); top-up approve, wallet
+  charge, and refund are each **idempotent** (proven under real Postgres
+  concurrency — never double-credit, double-charge, or double-refund). Admins
+  get `/admin/wallet/topups` (+ pending, detail, approve/reject with receipt
+  view), `/admin/wallet/transactions`, Telegram approve/reject buttons, and a
+  **Refund to wallet** action on the order page. **Not** in this phase: online
+  payment gateway, coupons / referrals / tickets / reports, reseller.
+
+### Phase 7 — wallet top-up & wallet payment
+
+**Top-up** (`app/services/wallet_service.py`, `wallet_topup_requests` table):
+`/wallet` → top-up asks an amount (validated against `min_wallet_topup` /
+`max_wallet_topup` / `wallet_topup_enabled`), opens a request, shows the
+card-to-card instructions, and takes a receipt (same validator + on-disk store
+as order receipts, under `storage/receipts/wallet/YYYY/MM/`). The request moves
+`pending_receipt → waiting_admin`; admins approve (credits the wallet, type
+`deposit`) or reject (with a reason) from the web or the Telegram buttons. A
+second approve/reject fails safely.
+
+**Wallet payment** — the Buy button now offers a **payment-method picker**
+(card-to-card / wallet) when both are enabled. Paying by wallet locks the user
+row, checks the balance, records a `purchase` transaction, marks the payment
+approved + order approved, and runs the existing delivery dispatcher — all under
+one lock with no intermediate commit, so a double-tap charges **once**. An
+insufficient balance shows the shortfall and a top-up button; the card-to-card
+receipt flow is unchanged.
+
+**Refund** — `Refund to wallet` on an approved/delivered/failed order credits the
+buyer (type `refund`), stamps `orders.refunded_at` + `payments.refunded_amount`,
+and is idempotent (a second refund is refused). Full refunds only.
+
+| Area | Routes / commands |
+|------|-------------------|
+| Bot user | `/wallet` (balance + top-up + history), method picker on Buy |
+| Bot admin | top-up notification with ✅/❌ buttons (`manage_wallet_topups`) |
+| Web top-ups | `GET /admin/wallet/topups` (+ `/pending`, `/{id}`), `POST …/{id}/{approve,reject}` |
+| Web | `GET /admin/wallet/transactions`, `GET /admin/wallet/receipts/{id}`, `POST /admin/orders/{id}/refund` |
+
+**Settings**: `wallet_enabled`, `wallet_topup_enabled`, `wallet_payment_enabled`,
+`min_wallet_topup`, `max_wallet_topup` (0 = unlimited), `allow_negative_wallet`.
+**Security / permissions**: receipts are served only to admins with
+`view_wallet_topups` (traversal-guarded); `manage_wallet_topups` approves/rejects
+(owner/admin/accountant); `refund_payments` refunds; support views only; balances
+never go negative unless `allow_negative_wallet`. Audited: `wallet_topup_created`,
+`wallet_topup_receipt_submitted`, `wallet_topup_approved/_rejected`,
+`wallet_payment_started/_completed`, `wallet_insufficient_balance`,
+`wallet_refund_created`, `wallet_balance_added/_subtracted`.
 
 ### Phase 6 — real 3X-UI V2Ray provisioning
 
@@ -599,6 +651,23 @@ rows (idempotent; never overwrites custom values).
 9. Disable / enable / reset-traffic / refresh-usage from the detail page (with
    `manage_services`); confirm a `viewer` is blocked from those actions.
 10. Confirm audit rows exist for provisioning and do not leak the panel password.
+
+## Phase 7 manual test checklist
+
+1. Log in; set the card-to-card settings; ensure **Wallet enabled** and **Wallet
+   top-up enabled**.
+2. In the bot send `/wallet`, request a top-up amount, and send a receipt.
+3. Confirm it appears under **Admin → Wallet → Pending top-ups**; approve it.
+4. Confirm the user's wallet balance increased and a `deposit` transaction exists.
+5. Buy a product and choose **Wallet**; confirm the balance decreases and the
+   license is delivered (or the V2Ray service is provisioned).
+6. Try buying with insufficient balance; confirm the shortfall message and that
+   no balance changed.
+7. Re-tap wallet pay on the same order; confirm it is **not** charged twice.
+8. Refund the order to the wallet; confirm the balance increases and a second
+   refund is refused.
+9. Confirm `/wallet` history shows deposit / purchase / refund, and that audit
+   rows exist without leaking secrets.
 
 ## Environment
 

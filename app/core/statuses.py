@@ -17,3 +17,13 @@ def order_status_label(status: str, lang: str = "fa") -> str:
 def payment_status_label(status: str, lang: str = "fa") -> str:
     label = t(f"payment.status.{status}", lang)
     return status if label == f"payment.status.{status}" else label
+
+
+def wallet_tx_type_label(tx_type: str, lang: str = "fa") -> str:
+    label = t(f"wallet.tx.{tx_type}", lang)
+    return tx_type if label == f"wallet.tx.{tx_type}" else label
+
+
+def topup_status_label(status: str, lang: str = "fa") -> str:
+    label = t(f"topup.status.{status}", lang)
+    return status if label == f"topup.status.{status}" else label

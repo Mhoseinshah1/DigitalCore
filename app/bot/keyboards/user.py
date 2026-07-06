@@ -9,7 +9,8 @@ from app.i18n import t
 def user_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows: list[list[KeyboardButton]] = [
         [KeyboardButton(text=t("btn.products", lang)), KeyboardButton(text=t("btn.my_orders", lang))],
-        [KeyboardButton(text=t("btn.my_licenses", lang)), KeyboardButton(text=t("btn.account", lang))],
+        [KeyboardButton(text=t("btn.my_licenses", lang)), KeyboardButton(text=t("btn.my_services", lang))],
+        [KeyboardButton(text=t("btn.wallet", lang)), KeyboardButton(text=t("btn.account", lang))],
         [KeyboardButton(text=t("btn.support", lang)), KeyboardButton(text=t("btn.rules", lang))],
         [KeyboardButton(text=t("btn.language", lang))],
     ]

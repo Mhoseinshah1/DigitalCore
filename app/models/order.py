@@ -83,6 +83,9 @@ class Order(Base, TimestampMixin):
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Refund foundation (Phase 7).
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refund_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Eager (selectin) so templates/bot can read related rows after the session
     # is closed without triggering a lazy load in async context.

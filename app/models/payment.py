@@ -59,6 +59,12 @@ class Payment(Base, TimestampMixin):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Refund foundation (Phase 7). `refunded_amount` is 0 until refunded.
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refunded_amount: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+
     order: Mapped["Order"] = relationship("Order", back_populates="payment")
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper

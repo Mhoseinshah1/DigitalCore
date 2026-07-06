@@ -85,3 +85,37 @@ async def notify_receipt_submitted(
         except Exception as exc:  # noqa: BLE001 - never break the user's flow
             log.warning("Failed to notify %s about receipt %s: %s",
                         chat_id, payment.id, exc)
+
+
+async def notify_wallet_topup_submitted(bot: Bot, *, topup, user, lang: str = "fa") -> None:
+    """Post a new wallet-top-up notice (with the receipt file when possible)."""
+    from app.bot.handlers.admin.wallet import topup_action_keyboard
+
+    username = user.username or user.first_name or "—"
+    submitted = topup.submitted_at.strftime("%Y-%m-%d %H:%M") if topup.submitted_at else "—"
+    text = "\n".join([
+        t("notify.topup.title", lang),
+        "",
+        t("notify.topup.user", lang, username=username, tg_id=user.telegram_id or "—"),
+        t("notify.topup.amount", lang, amount=f"{topup.amount:,}"),
+        t("notify.topup.time", lang, time=submitted),
+        "",
+        t("notify.topup.review_panel", lang),
+    ])
+    keyboard = topup_action_keyboard(topup.id, lambda k, **p: t(k, lang, **p))
+    file_id = topup.receipt_file_id
+    mime = (topup.receipt_mime_type or "").lower()
+    for chat_id in await _recipients():
+        try:
+            if file_id and mime.startswith("image/"):
+                await bot.send_photo(chat_id, file_id, caption=text,
+                                     parse_mode="HTML", reply_markup=keyboard)
+            elif file_id:
+                await bot.send_document(chat_id, file_id, caption=text,
+                                        parse_mode="HTML", reply_markup=keyboard)
+            else:
+                await bot.send_message(chat_id, text, parse_mode="HTML",
+                                       reply_markup=keyboard)
+        except Exception as exc:  # noqa: BLE001 - never break the user's flow
+            log.warning("Failed to notify %s about top-up %s: %s",
+                        chat_id, topup.id, exc)
