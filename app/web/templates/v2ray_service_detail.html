@@ -6,7 +6,7 @@
   <p class="muted"><a href="/admin/v2ray-services">{{ _("web.services.back") }}</a></p>
 </header>
 
-{% if saved %}<div class="alert ok">{{ _("web.services.flash." ~ saved) if saved in ("refreshed","disabled","enabled","deleted","reset","retried") else _("web.licenses.saved") }}</div>{% endif %}
+{% if saved %}<div class="alert ok">{{ _("web.services.flash." ~ saved) if saved in ("refreshed","disabled","enabled","deleted","reset","retried","renewed","traffic_added") else _("web.licenses.saved") }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
 <section class="panel">
@@ -21,7 +21,8 @@
     <dt>{{ _("web.services.uuid") }}</dt><dd><code>{{ masked_uuid }}</code></dd>
     <dt>{{ _("web.services.ip_limit") }}</dt><dd>{{ svc.ip_limit or 1 }}</dd>
     <dt>{{ _("web.services.usage") }}</dt><dd>{{ used_disp }} / {{ total_disp }}</dd>
-    <dt>{{ _("web.services.expiry") }}</dt><dd>{{ svc.expire_at.strftime("%Y-%m-%d %H:%M") if svc.expire_at else "—" }}</dd>
+    <dt>{{ _("web.services.remaining") }}</dt><dd>{{ remaining_disp }}</dd>
+    <dt>{{ _("web.services.expiry") }}</dt><dd>{{ svc.expire_at.strftime("%Y-%m-%d %H:%M") if svc.expire_at else "—" }}{% if remaining_days is not none %} <span class="muted">({{ _("web.services.remaining_days", days=remaining_days) }})</span>{% endif %}</dd>
     <dt>{{ _("web.services.last_sync") }}</dt><dd class="muted">{{ svc.last_traffic_sync_at.strftime("%Y-%m-%d %H:%M") if svc.last_traffic_sync_at else "—" }}</dd>
     <dt>{{ _("web.services.sub_url") }}</dt>
     <dd>{% if svc.subscription_url %}<code>{{ svc.subscription_url }}</code>{% else %}<span class="muted">{{ _("web.services.no_sub") }}</span>{% endif %}</dd>
@@ -41,7 +42,7 @@
     <form method="post" action="/admin/v2ray-services/{{ svc.id }}/disable">
       <button type="submit" class="btn">⏸ {{ _("web.services.action.disable") }}</button>
     </form>
-    {% elif svc.status in ("disabled","expired") %}
+    {% elif svc.status in ("disabled","expired","over_quota") %}
     <form method="post" action="/admin/v2ray-services/{{ svc.id }}/enable">
       <button type="submit" class="btn">▶️ {{ _("web.services.action.enable") }}</button>
     </form>
@@ -59,6 +60,25 @@
     </form>
     {% endif %}
   </div>
+
+  {% if can_manage and svc.status != "deleted" %}
+  <div class="action-row" style="margin-top:1rem;">
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/renew" class="inline-form">
+      <label>{{ _("web.services.action.renew") }}
+        <input type="number" name="days" min="1" value="30" required style="width:6rem;">
+        {{ _("web.services.days") }}
+      </label>
+      <button type="submit" class="btn">♻️ {{ _("web.services.action.renew") }}</button>
+    </form>
+    <form method="post" action="/admin/v2ray-services/{{ svc.id }}/add-traffic" class="inline-form">
+      <label>{{ _("web.services.action.add_traffic") }}
+        <input type="number" name="gb" min="1" value="10" required style="width:6rem;">
+        {{ _("web.services.gb") }}
+      </label>
+      <button type="submit" class="btn">➕ {{ _("web.services.action.add_traffic") }}</button>
+    </form>
+  </div>
+  {% endif %}
 </section>
 
 {% if logs %}

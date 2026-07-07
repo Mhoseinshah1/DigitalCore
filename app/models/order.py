@@ -70,6 +70,14 @@ class Order(Base, TimestampMixin):
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Service-action orders (Phase 8): a renew/add-traffic order carries the
+    # action and the existing V2RayService it targets. `action_type` is null for
+    # ordinary new-service / license orders.
+    action_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    target_service_id: Mapped[int | None] = mapped_column(
+        ForeignKey("v2ray_services.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # A non-secret summary of what was delivered (e.g. "license #12 · a@b.com").
     # Never contains a password. Filled by delivery_service.
     delivered_payload: Mapped[str | None] = mapped_column(Text, nullable=True)

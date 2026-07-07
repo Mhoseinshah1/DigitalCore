@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.bot.handlers.user.services as svc_mod
-from app.bot.handlers.user.services import on_my_services, on_service_detail
+from app.bot.handlers.user.services import (
+    on_my_services,
+    on_service_detail,
+    on_service_link,
+)
 from app.i18n import t
 from app.models import Base, Order, Product, User, V2RayService, XuiInbound, XuiServer
 
@@ -105,8 +109,21 @@ async def test_service_detail_only_own(db) -> None:
     await on_service_detail(cb, FA, lang="fa")
     assert cb.alerts and cb.alerts[0] == FA("services.user.not_found")
 
-    # The owner sees the subscription link.
+    # The owner sees the service detail (title + live usage/expiry).
     owner_msg = FM(FU(12))
     cb2 = FCB(f"usvc:{sid}", FU(12), owner_msg)
     await on_service_detail(cb2, FA, lang="fa")
+    assert any("VPN-30" in a for a in owner_msg.answers)
+
+
+async def test_service_link_resends_subscription(db) -> None:
+    uid, sid = await _service(db, tg=14)
+    # A non-owner is refused the link.
+    cb = FCB(f"usvcl:{sid}", FU(99), FM(FU(99)))
+    await on_service_link(cb, FA, lang="fa")
+    assert cb.alerts and cb.alerts[0] == FA("services.user.not_found")
+    # The owner gets the subscription link resent.
+    owner_msg = FM(FU(14))
+    cb2 = FCB(f"usvcl:{sid}", FU(14), owner_msg)
+    await on_service_link(cb2, FA, lang="fa")
     assert any("sub.example.com" in a for a in owner_msg.answers)

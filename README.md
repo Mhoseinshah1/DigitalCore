@@ -118,6 +118,63 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   view), `/admin/wallet/transactions`, Telegram approve/reject buttons, and a
   **Refund to wallet** action on the order page. **Not** in this phase: online
   payment gateway, coupons / referrals / tickets / reports, reseller.
+- **Phase 8 — done.** **Renewal + add-traffic + V2Ray service lifecycle.** A
+  V2Ray service is now a living thing: users **renew** (extend the expiry from
+  `max(now, current expiry)` by a plan's duration) and **add traffic** (grow the
+  quota) from `/my_services`, paying by card-to-card or wallet like any order.
+  Delivery for a renew/add-traffic order runs under the **order-row lock** with a
+  single terminal commit, so it is **idempotent** — a redelivery never
+  double-renews (proven under real Postgres concurrency) — and a panel failure
+  **never** rolls back the payment (the order stays retryable). A background
+  worker sweep marks services **expired** / **over-quota**, refreshes usage from
+  3X-UI on an interval (batched, never spammy), optionally **auto-disables**
+  expired / over-quota clients on the panel, and sends **one-shot** expiry /
+  traffic warnings. Admins get renew / add-traffic controls + live
+  remaining-traffic / remaining-days on the service page. **Not** in this phase:
+  coupons / referrals / tickets / reseller / reports, online payment gateway,
+  Marzban / Hiddify adapters.
+
+### Phase 8 — renewal, add-traffic & service lifecycle
+
+**Service actions** (`app/services/v2ray_lifecycle_service.py`). A renew /
+add-traffic **product** is a v2ray product with `applies_to_service = true` and an
+`action_type` (`renew_service` / `add_traffic`); such products are hidden from the
+normal catalog and only reachable from a specific service. Buying one creates an
+order carrying `action_type` + `target_service_id` (validated: the target must be
+the buyer's own, non-deleted service, and the product must match the action).
+`renew_service` extends the expiry and re-enables the panel client
+(verify-after-write); `add_traffic` grows `total_gb` and clears an over-quota
+state. Both compute the new fields, write+verify on the panel, and **only then**
+mutate the local row — so a panel failure leaves the service untouched.
+
+**Order-driven delivery** — `apply_service_action_for_order` locks the order row
+`FOR UPDATE` for the whole operation (no intermediate commit), guards on
+`status == "delivered"` for idempotency, and on a panel error marks the order
+`provisioning_pending` + a safe `delivery_error` **without** undoing the payment.
+The delivery dispatcher routes a v2ray order to provisioning (Phase 6) or to this
+lifecycle path by `action_type`. Admins can retry a failed action from the order
+page.
+
+**Worker lifecycle sweep** (`app/worker/main.py` → `lifecycle_tick`, error-isolated
+per step): DB-only marking of `expired` / `over_quota`; an interval-gated, batched
+usage refresh from the panel (`v2ray_usage_refresh_*`); optional panel
+auto-disable of expired / over-quota clients (`v2ray_auto_disable_*`, idempotent
+via `disabled_at`); and one-shot expiry / traffic warnings (guarded by
+`last_*_warning_at`, reset on renew / add-traffic so a later cycle can warn again).
+
+| Area | Routes / commands |
+|------|-------------------|
+| Bot user | `/my_services` detail (live usage / remaining / days) → **Get link · Refresh · Renew · Add traffic** → plan → method picker → pay |
+| Web | `POST /admin/v2ray-services/{id}/{renew,add-traffic}`, `POST /admin/orders/{id}/retry-v2ray-provisioning` (renew/add-traffic aware) |
+
+**Settings**: `v2ray_usage_refresh_enabled` (true), `v2ray_usage_refresh_interval_minutes`
+(60), `v2ray_expiry_warning_days` (3), `v2ray_traffic_warning_percent` (90),
+`v2ray_auto_disable_expired` (true), `v2ray_auto_disable_over_quota` (true).
+**Security / permissions**: users can only renew / add-traffic / view their **own**
+service; admin lifecycle controls need `manage_services`; no XUI credential is ever
+logged. Audited: `v2ray_action_started/_delivered/_failed`, `v2ray_service_renewed`,
+`v2ray_traffic_added`, `v2ray_service_auto_disabled`, plus the Phase 6 management
+actions.
 
 ### Phase 7 — wallet top-up & wallet payment
 
@@ -668,6 +725,25 @@ rows (idempotent; never overwrites custom values).
    refund is refused.
 9. Confirm `/wallet` history shows deposit / purchase / refund, and that audit
    rows exist without leaking secrets.
+
+## Phase 8 manual test checklist
+
+1. Create a v2ray product and a **renewal** product (`applies_to_service`,
+   `action_type = renew_service`, a duration) + an **add-traffic** product
+   (`action_type = add_traffic`, a traffic amount). Confirm neither appears in the
+   normal catalog.
+2. Buy the base product and let it provision; open `/my_services` → the service.
+   Confirm it shows live status, remaining traffic, and days left.
+3. Tap **Renew**, pick the plan, pay (card or wallet); confirm the expiry moves
+   out by the plan's duration and the service is active.
+4. Tap **Add traffic**, pick the package, pay; confirm the quota grows.
+5. Force a failure (stop the panel) and retry the renew from the order page;
+   confirm the payment was **not** undone and the order is retryable.
+6. Set a service's expiry into the past / usage over quota and run the worker;
+   confirm it is marked `expired` / `over_quota` and (if enabled) auto-disabled.
+7. Confirm expiry / traffic warnings fire **once** as a service approaches its
+   limit, and again after a renew / add-traffic.
+8. Confirm audit rows exist for the actions and no XUI credential is logged.
 
 ## Environment
 

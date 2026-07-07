@@ -56,11 +56,17 @@ async def create_order(
     *,
     payment_method: str = "card_to_card",
     user_note: str | None = None,
+    action_type: str | None = None,
+    target_service_id: int | None = None,
 ) -> Order:
     """Create a pending_payment order for a purchasable product.
 
     Raises OrderError when sales/card-to-card are off, the product is not
     purchasable, its price is invalid, or a V2Ray product lacks its XUI binding.
+
+    A renew/add-traffic order (Phase 8) additionally carries ``action_type`` and
+    ``target_service_id``: the product must be a matching service-action product,
+    and the target V2RayService must belong to the buyer and not be deleted.
     Nothing is delivered here.
     """
     if payment_method not in ("card_to_card", "wallet"):
@@ -87,12 +93,36 @@ async def create_order(
     if price <= 0:
         raise OrderError("product price is not set", code="invalid_price")
 
-    # V2Ray products must already be bound to a server + inbound (Phase 2.1). We
-    # do NOT create the client yet — we only refuse to sell a misconfigured one.
-    if product.type == "v2ray" and (not product.xui_server_id or not product.xui_inbound_id):
-        raise OrderError(
-            "this V2Ray product is not fully configured", code="product_misconfigured"
-        )
+    # Service-action orders (Phase 8): renew/add-traffic. Validate the product
+    # supports the action and the target service belongs to the buyer.
+    if action_type is not None:
+        if action_type not in ("renew_service", "add_traffic"):
+            raise OrderError("unknown service action", code="bad_action")
+        if (product.type != "v2ray" or not product.applies_to_service
+                or product.action_type != action_type):
+            raise OrderError(
+                "product does not support this action", code="product_action_mismatch")
+        if not target_service_id:
+            raise OrderError("no target service selected", code="no_target_service")
+        from app.models.v2ray_service import V2RayService
+        service = await session.get(V2RayService, target_service_id)
+        if service is None or service.user_id != user_id:
+            raise OrderError("not your service", code="not_your_service")
+        if service.status == "deleted":
+            raise OrderError("service is deleted", code="service_deleted")
+    else:
+        # A product that only modifies an existing service cannot be sold as a
+        # standalone (new) order.
+        if product.applies_to_service:
+            raise OrderError(
+                "this product requires an existing service", code="requires_service")
+        # New V2Ray service orders must already be bound to a server + inbound
+        # (Phase 2.1). We do NOT create the client yet — we only refuse to sell a
+        # misconfigured one.
+        if product.type == "v2ray" and (
+                not product.xui_server_id or not product.xui_inbound_id):
+            raise OrderError(
+                "this V2Ray product is not fully configured", code="product_misconfigured")
 
     discount_amount = 0
     final_amount = price - discount_amount
@@ -110,6 +140,8 @@ async def create_order(
             status="pending_payment",
             payment_method=payment_method,
             user_note=user_note,
+            action_type=action_type,
+            target_service_id=target_service_id,
         )
         session.add(candidate)
         try:

@@ -1,14 +1,18 @@
 """Background worker entrypoint.
 
 A thin async loop that ticks roughly every 30 seconds and shuts down cleanly on
-SIGTERM/SIGINT. On each tick it runs the Phase 6 expiry sweep — a DB-only pass
-that flips active-but-past-expiry V2Ray services to `expired`. It makes NO panel
-calls (so it can never spam a 3X-UI server) and is error-isolated so a failure
-never crashes the worker.
+SIGTERM/SIGINT. On each tick it runs the V2Ray lifecycle sweep (Phase 8):
 
-TODO(phase 6+): a batched, rate-limited traffic-usage refresh across active
-services (calls the panel) belongs here too — left out for now to avoid panel
-spam; `v2ray_service.refresh_service_usage` is ready to be scheduled.
+  * DB-only marking of expired / over-quota services (cheap, every tick);
+  * an interval-gated, batched traffic-usage refresh from the panel
+    (``v2ray_usage_refresh_*`` settings) — never spammy: each service is synced
+    at most once per interval and only a small batch runs per tick;
+  * optional panel auto-disable of expired / over-quota clients
+    (``v2ray_auto_disable_*`` settings), idempotent per service;
+  * one-shot expiry / traffic warnings to owners.
+
+Every step is error-isolated (``lifecycle_tick`` catches per-step) so a panel
+timeout or a bad row never crashes the loop.
 
 Run with:  python -m app.worker.main
 """
@@ -25,23 +29,24 @@ log = logging.getLogger("worker")
 HEARTBEAT_SECONDS = 30
 
 
-async def _expiry_sweep() -> None:
-    """DB-only: mark active-but-expired V2Ray services as expired. Never raises."""
+async def _lifecycle_sweep() -> None:
+    """Run one V2Ray lifecycle pass. Never raises (each step is isolated)."""
     try:
         from app.database import SessionLocal
-        from app.services import v2ray_service
+        from app.services import v2ray_lifecycle_service
         async with SessionLocal() as session:
-            n = await v2ray_service.mark_expired_services(session)
-        if n:
-            log.info("expiry sweep: marked %s service(s) expired", n)
+            result = await v2ray_lifecycle_service.lifecycle_tick(session)
+        acted = {k: v for k, v in result.items() if v}  # keep the log quiet
+        if acted:
+            log.info("lifecycle sweep: %s", acted)
     except Exception as exc:  # noqa: BLE001 - error isolation: never crash the loop
-        log.warning("expiry sweep failed: %s", exc)
+        log.warning("lifecycle sweep failed: %s", exc)
 
 
 async def _run(stop: asyncio.Event) -> None:
     log.info("Worker started (tick every %ss).", HEARTBEAT_SECONDS)
     while not stop.is_set():
-        await _expiry_sweep()
+        await _lifecycle_sweep()
         try:
             # Wake immediately when a shutdown signal arrives, otherwise tick.
             await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SECONDS)

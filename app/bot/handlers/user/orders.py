@@ -96,10 +96,12 @@ CB_PAY_WALLET = "upayw:"
 
 
 async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., str],
-                              state: FSMContext) -> None:
+                              state: FSMContext, *, action_type: str | None = None,
+                              target_service_id: int | None = None) -> None:
     """Create the card-to-card order + payment and show the transfer instructions.
 
-    Unchanged Phase 3 flow, extracted so the payment-method picker can reuse it.
+    Extracted so the payment-method picker can reuse it. A renew/add-traffic order
+    (Phase 8) passes ``action_type`` + ``target_service_id`` through to create_order.
     """
     async with SessionLocal() as session:
         svc = SettingsService(session)
@@ -124,7 +126,9 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
         )
         await session.commit()
         try:
-            order = await order_service.create_order(session, user.id, product_id)
+            order = await order_service.create_order(
+                session, user.id, product_id, action_type=action_type,
+                target_service_id=target_service_id)
             await payment_service.create_payment_for_order(session, order)
             await session.commit()
         except OrderError as exc:
@@ -147,8 +151,14 @@ def _topup_button(_: Callable[..., str]) -> InlineKeyboardMarkup:
     ])
 
 
-async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str], bot) -> None:
-    """Charge the wallet for the product, then run the existing delivery flow."""
+async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str], bot,
+                           *, action_type: str | None = None,
+                           target_service_id: int | None = None) -> None:
+    """Charge the wallet for the product, then run the existing delivery flow.
+
+    A renew/add-traffic order (Phase 8) passes ``action_type`` +
+    ``target_service_id`` through to create_order; delivery then routes to the
+    lifecycle service, which sends its own action-specific confirmation."""
     async with SessionLocal() as session:
         user, _created = await user_service.create_or_update_from_telegram(
             session, telegram_id=tg_user.id, username=tg_user.username,
@@ -170,7 +180,8 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
             return
         try:
             order = await order_service.create_order(
-                session, user.id, product_id, payment_method="wallet")
+                session, user.id, product_id, payment_method="wallet",
+                action_type=action_type, target_service_id=target_service_id)
             await session.commit()
         except OrderError as exc:
             if reply is not None:
@@ -253,6 +264,107 @@ async def on_pay_wallet(
     product_id = int((callback.data or "0")[len(CB_PAY_WALLET):])
     await callback.answer()
     await _pay_with_wallet(callback.message, callback.from_user, product_id, _, bot)
+
+
+# --------------------------------------------------------------------------
+# Service-action purchase (Phase 8): renew / add-traffic on an existing service.
+# Callback data is compact: ``uact:<r|t>:<service_id>:<product_id>``.
+# --------------------------------------------------------------------------
+CB_ACTION = "uact:"          # method picker for an action product
+CB_ACTION_CARD = "uactc:"    # card-to-card for an action product
+CB_ACTION_WALLET = "uactw:"  # wallet for an action product
+
+_ACTION_BY_CHAR = {"r": "renew_service", "t": "add_traffic"}
+_CHAR_BY_ACTION = {"renew_service": "r", "add_traffic": "t"}
+
+
+def action_purchase_cb(action_type: str, service_id: int, product_id: int) -> str:
+    """Build the method-picker callback for an action product."""
+    return f"{CB_ACTION}{_CHAR_BY_ACTION[action_type]}:{service_id}:{product_id}"
+
+
+def _parse_action_cb(data: str, prefix: str) -> tuple[str, int, int] | None:
+    """(action_type, service_id, product_id) from ``<prefix><r|t>:<sid>:<pid>``."""
+    try:
+        char, sid, pid = data[len(prefix):].split(":", 2)
+        return _ACTION_BY_CHAR[char], int(sid), int(pid)
+    except (ValueError, KeyError):
+        return None
+
+
+async def _start_action_payment(
+    reply, tg_user, action_type: str, service_id: int, product_id: int,
+    _: Callable[..., str], state: FSMContext, bot,
+) -> None:
+    """Offer the method picker for an action order, or go straight to the only one."""
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not await svc.get_bool("sales_enabled", True):
+            if reply is not None:
+                await reply.answer(_("purchase.sales_disabled"))
+            return
+        card_ok = (await svc.get_bool("card_to_card_enabled", True)
+                   and bool((await svc.get_str("card_number", "")).strip()))
+        wallet_ok = (await svc.get_bool("wallet_enabled", True)
+                     and await svc.get_bool("wallet_payment_enabled", True))
+    char = _CHAR_BY_ACTION[action_type]
+    if wallet_ok and card_ok:
+        if reply is not None:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=_("purchase.method.card"),
+                    callback_data=f"{CB_ACTION_CARD}{char}:{service_id}:{product_id}")],
+                [InlineKeyboardButton(
+                    text=_("purchase.method.wallet"),
+                    callback_data=f"{CB_ACTION_WALLET}{char}:{service_id}:{product_id}")],
+            ])
+            await reply.answer(_("purchase.choose_method"), reply_markup=kb)
+        return
+    if wallet_ok:
+        await _pay_with_wallet(reply, tg_user, product_id, _, bot,
+                               action_type=action_type, target_service_id=service_id)
+        return
+    await _start_card_payment(reply, tg_user, product_id, _, state,
+                              action_type=action_type, target_service_id=service_id)
+
+
+@router.callback_query(F.data.startswith(CB_ACTION_CARD))
+async def on_action_pay_card(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    parsed = _parse_action_cb(callback.data or "", CB_ACTION_CARD)
+    await callback.answer()
+    if parsed is None:
+        return
+    action_type, service_id, product_id = parsed
+    await _start_card_payment(callback.message, callback.from_user, product_id, _, state,
+                              action_type=action_type, target_service_id=service_id)
+
+
+@router.callback_query(F.data.startswith(CB_ACTION_WALLET))
+async def on_action_pay_wallet(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    parsed = _parse_action_cb(callback.data or "", CB_ACTION_WALLET)
+    await callback.answer()
+    if parsed is None:
+        return
+    action_type, service_id, product_id = parsed
+    await _pay_with_wallet(callback.message, callback.from_user, product_id, _, bot,
+                           action_type=action_type, target_service_id=service_id)
+
+
+@router.callback_query(F.data.startswith(CB_ACTION))
+async def on_action_pick(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    parsed = _parse_action_cb(callback.data or "", CB_ACTION)
+    await callback.answer()
+    if parsed is None:
+        return
+    action_type, service_id, product_id = parsed
+    await _start_action_payment(
+        callback.message, callback.from_user, action_type, service_id, product_id, _, state, bot)
 
 
 async def _download_telegram_file(bot: Bot, file_id: str) -> bytes:

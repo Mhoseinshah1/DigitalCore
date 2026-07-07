@@ -39,6 +39,7 @@ V2RAY_SERVICE_STATUSES: tuple[str, ...] = (
     "active",        # client verified on the panel, delivered
     "disabled",      # admin-disabled on the panel
     "expired",       # past expire_at
+    "over_quota",    # used_gb >= total_gb (Phase 8)
     "deleted",       # removed from the panel
     "failed",        # provisioning failed; awaits retry
 )
@@ -99,9 +100,24 @@ class V2RayService(Base, TimestampMixin):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Lifecycle (Phase 8): when the service crossed expiry / quota, and when the
+    # user was last warned (so a warning fires at most once per period).
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    over_quota_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_expiry_warning_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_traffic_warning_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Eager (selectin) so templates/bot read related rows after the session closes.
     user: Mapped["User"] = relationship("User", lazy="selectin")
-    order: Mapped["Order"] = relationship("Order", lazy="selectin")
+    # Disambiguate: `orders.target_service_id` (Phase 8) also links the two tables,
+    # so pin this relationship to the owning-order FK.
+    order: Mapped["Order"] = relationship(
+        "Order", lazy="selectin", foreign_keys=[order_id]
+    )
     product: Mapped["Product"] = relationship("Product", lazy="selectin")
     xui_server: Mapped["XuiServer"] = relationship("XuiServer", lazy="selectin")
     xui_inbound: Mapped["XuiInbound"] = relationship("XuiInbound", lazy="selectin")

@@ -108,10 +108,28 @@ async def list_for_admin(session: AsyncSession) -> list[Product]:
 
 
 async def list_for_user(session: AsyncSession) -> list[Product]:
-    """Only purchasable-looking products: active AND not hidden."""
+    """Purchasable catalog products: active, not hidden, and NOT service-actions.
+
+    Renew/add-traffic products (``applies_to_service``) are excluded here — they
+    are only reachable from a specific service in /my_services (Phase 8)."""
     result = await session.execute(
         select(Product)
-        .where(Product.is_active.is_(True), Product.is_hidden.is_(False))
+        .where(Product.is_active.is_(True), Product.is_hidden.is_(False),
+               Product.applies_to_service.is_(False))
+        .order_by(Product.sort_order, Product.id)
+    )
+    return list(result.scalars().all())
+
+
+async def list_service_action_products(
+    session: AsyncSession, action_type: str
+) -> list[Product]:
+    """Active, non-hidden v2ray products for a given service action (Phase 8)."""
+    result = await session.execute(
+        select(Product)
+        .where(Product.is_active.is_(True), Product.is_hidden.is_(False),
+               Product.type == "v2ray", Product.applies_to_service.is_(True),
+               Product.action_type == action_type)
         .order_by(Product.sort_order, Product.id)
     )
     return list(result.scalars().all())

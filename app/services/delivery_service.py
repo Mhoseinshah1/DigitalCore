@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
-from app.services import license_service, v2ray_service
+from app.services import license_service, v2ray_lifecycle_service, v2ray_service
 
 log = logging.getLogger("delivery")
 
@@ -44,12 +44,21 @@ async def deliver_order(
             return {"ok": False, "delivered": False, "reason": exc.code}
 
     if product.type == "v2ray":
+        # A renew/add-traffic order modifies an existing service (Phase 8); a
+        # plain v2ray order provisions a new client (Phase 6).
+        is_action = order.action_type in ("renew_service", "add_traffic")
         try:
-            result = await v2ray_service.provision_service_for_order(
-                session, order.id, actor_id=actor_id, bot=bot
-            )
+            if is_action:
+                result = await v2ray_lifecycle_service.apply_service_action_for_order(
+                    session, order.id, actor_id=actor_id, bot=bot
+                )
+            else:
+                result = await v2ray_service.provision_service_for_order(
+                    session, order.id, actor_id=actor_id, bot=bot
+                )
         except v2ray_service.V2RayError as exc:
-            log.warning("V2Ray provisioning error for order %s: %s", order.order_number, exc)
+            log.warning("V2Ray %s error for order %s: %s",
+                        "action" if is_action else "provisioning", order.order_number, exc)
             return {"ok": False, "delivered": False, "reason": exc.code}
         # Normalize to the dispatcher's {ok, delivered, reason} shape.
         return {

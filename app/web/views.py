@@ -47,6 +47,7 @@ from app.services import (
     payment_service,
     product_service,
     user_service,
+    v2ray_lifecycle_service,
     v2ray_service,
     wallet_service,
     xui_server_service,
@@ -2036,10 +2037,14 @@ async def v2ray_service_detail_page(
         if (r.target_type == "v2ray_service" and str(r.target_id) == str(svc.id))
         or (r.target_type == "order" and str(r.target_id) == str(svc.order_id))
     ]
+    rem_bytes = v2ray_lifecycle_service.remaining_bytes(svc)
+    rem_days = v2ray_lifecycle_service.remaining_days(svc)
     return templates.TemplateResponse(
         "v2ray_service_detail.html",
         _ctx(request, admin, svc=svc, masked_uuid=_mask_uuid(svc.client_uuid),
              used_disp=_gb_disp(svc.used_gb), total_disp=_gb_disp(svc.total_gb),
+             remaining_disp=("∞" if rem_bytes is None else _gb_disp(rem_bytes)),
+             remaining_days=rem_days,
              logs=logs, can_manage=has_permission(admin.role, "manage_services"),
              saved=saved, error=error),
     )
@@ -2102,6 +2107,48 @@ for _saved in ("disabled", "enabled", "deleted", "reset"):
     )
 
 
+@router.post("/v2ray-services/{service_id}/renew")
+async def v2ray_renew(
+    service_id: int,
+    request: Request,
+    days: int = Form(...),
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Admin renewal (Phase 8): extend the service by `days` and re-enable it."""
+    lang, deny = _guard(request, admin, "manage_services")
+    if deny:
+        return deny
+    try:
+        await v2ray_lifecycle_service.renew_service(
+            session, service_id, duration_days=int(days), actor_id=admin.id)
+        await session.commit()
+    except v2ray_service.V2RayError as exc:
+        return _service_back(service_id, error=str(exc))
+    return _service_back(service_id, saved="renewed")
+
+
+@router.post("/v2ray-services/{service_id}/add-traffic")
+async def v2ray_add_traffic(
+    service_id: int,
+    request: Request,
+    gb: int = Form(...),
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Admin add-traffic (Phase 8): grow the service quota by `gb` and clear over-quota."""
+    lang, deny = _guard(request, admin, "manage_services")
+    if deny:
+        return deny
+    try:
+        await v2ray_lifecycle_service.add_traffic(
+            session, service_id, traffic_gb=int(gb), actor_id=admin.id)
+        await session.commit()
+    except v2ray_service.V2RayError as exc:
+        return _service_back(service_id, error=str(exc))
+    return _service_back(service_id, saved="traffic_added")
+
+
 @router.post("/orders/{order_id}/retry-v2ray-provisioning")
 async def order_retry_v2ray(
     order_id: int,
@@ -2112,10 +2159,19 @@ async def order_retry_v2ray(
     lang, deny = _guard(request, admin, "manage_services")
     if deny:
         return deny
+    # A renew/add-traffic order retries through the lifecycle path; a plain
+    # new-service order retries through provisioning.
+    order = await order_service.get_order(session, order_id)
+    is_action = order is not None and order.action_type in ("renew_service", "add_traffic")
     try:
-        result = await v2ray_service.retry_failed_provisioning(
-            session, order_id, actor_id=admin.id
-        )
+        if is_action:
+            result = await v2ray_lifecycle_service.retry_action_for_order(
+                session, order_id, actor_id=admin.id
+            )
+        else:
+            result = await v2ray_service.retry_failed_provisioning(
+                session, order_id, actor_id=admin.id
+            )
     except v2ray_service.V2RayError as exc:
         return _order_back(order_id, error=str(exc))
     if result.get("ok"):

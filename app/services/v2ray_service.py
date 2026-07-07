@@ -424,8 +424,25 @@ async def refresh_service_usage(
     service.used_gb = int((traffic.up or 0) + (traffic.down or 0))
     service.last_traffic_sync_at = _now()
     service.last_error = None
-    if service.status == "active" and _is_expired(service.expire_at):
-        service.status = "expired"
+    # Reconcile lifecycle status against the freshly-synced usage/expiry (Phase 8).
+    # Only `active`/`over_quota` are auto-reconciled here; admin `disabled`/`deleted`
+    # and `failed` states are left untouched.
+    now = _now()
+    over_quota = int(service.total_gb or 0) > 0 and int(service.used_gb or 0) >= int(service.total_gb)
+    if service.status == "active":
+        if _is_expired(service.expire_at):
+            service.status = "expired"
+            service.expired_at = service.expired_at or now
+        elif over_quota:
+            service.status = "over_quota"
+            service.over_quota_at = service.over_quota_at or now
+    elif service.status == "over_quota":
+        if _is_expired(service.expire_at):
+            service.status = "expired"
+            service.expired_at = service.expired_at or now
+        elif not over_quota:  # traffic was reset on the panel — back to active
+            service.status = "active"
+            service.over_quota_at = None
     await audit_service.log(
         session, actor_type="admin", actor_id=actor_id,
         action="v2ray_service_usage_refreshed", target_type="v2ray_service",
@@ -512,6 +529,13 @@ async def reset_service_traffic(
         raise V2RayError(_safe_error(str(exc)), code="panel_error") from exc
     service.used_gb = 0
     service.last_traffic_sync_at = _now()
+    # Clearing usage lifts an over-quota state (Phase 8): back to active unless the
+    # service is also past its expiry. The warning stamp resets so a fresh 90%
+    # crossing can warn again.
+    if service.status == "over_quota":
+        service.status = "expired" if _is_expired(service.expire_at) else "active"
+        service.over_quota_at = None
+    service.last_traffic_warning_at = None
     await audit_service.log(
         session, actor_type="admin", actor_id=actor_id, action="v2ray_traffic_reset",
         target_type="v2ray_service", target_id=service.id,
@@ -640,6 +664,7 @@ async def mark_expired_services(session: AsyncSession) -> int:
     )).scalars().all()
     for svc in rows:
         svc.status = "expired"
+        svc.expired_at = svc.expired_at or now
     if rows:
         await session.commit()
     return len(rows)

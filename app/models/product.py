@@ -13,6 +13,11 @@ from app.models.base import Base, TimestampMixin
 
 PRODUCT_TYPES: tuple[str, ...] = ("license", "v2ray")
 
+# What a v2ray product does when bought (Phase 8). `new_service` (default/None)
+# provisions a fresh client; `renew_service` / `add_traffic` modify an existing
+# V2RayService the buyer already owns.
+PRODUCT_ACTION_TYPES: tuple[str, ...] = ("new_service", "renew_service", "add_traffic")
+
 
 class Product(Base, TimestampMixin):
     __tablename__ = "products"
@@ -30,6 +35,14 @@ class Product(Base, TimestampMixin):
     duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     traffic_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ip_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Service-action support (Phase 8). action_type is one of PRODUCT_ACTION_TYPES;
+    # applies_to_service marks renew/add-traffic products that modify an existing
+    # V2RayService instead of creating a new client.
+    action_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    applies_to_service: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
     # Legacy plain-int references (panel-side ids); superseded by the FK bindings
     # below and kept only for backward compatibility.
