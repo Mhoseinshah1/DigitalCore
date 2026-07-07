@@ -6,7 +6,7 @@ pytest-asyncio==0.24.0
 # httpx is a RUNTIME dependency (declared in requirements.txt, inherited via -r
 # above); the test suite also uses it as the FastAPI/ASGI transport.
 anyio==4.7.0
-aiosqlite==0.20.0
+aiosqlite==0.22.1
 
 # Optional static analysis (not required by CI yet).
 ruff==0.8.4
