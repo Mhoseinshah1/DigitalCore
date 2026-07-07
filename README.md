@@ -821,6 +821,39 @@ rows (idempotent; never overwrites custom values).
 12. Toggle the tutorial inactive and confirm it disappears from the bot.
 13. Confirm audit rows exist for ticket + tutorial actions and no secrets leak.
 
+## CI / GitHub Actions
+
+Continuous integration runs on **every pull request to `main`**, **every push to
+`main`**, and on demand (`workflow_dispatch`) via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) — the workflow is named
+**DigitalCore CI**. It uses only dummy CI values: no real Telegram token, no real
+3X-UI panel, and no production `.env`. XUI and network-dependent tests are mocked,
+so CI passes on a fresh clone.
+
+Jobs:
+
+| Job | What it checks |
+|-----|----------------|
+| **lint-test** | `python -m compileall app migrations tests`, `python -m pytest -q` (SQLite fallback), `bash -n` on `install.sh` + `scripts/*.sh`, and `docker compose config` |
+| **migration-check** | Runs `alembic upgrade head` + `alembic current` against a fresh **postgres:15** service (with **redis:7** available) |
+| **docker-build** | `docker compose config` and `docker compose build backend bot worker` using a dummy `.env` |
+| **optional-smoke** | Best-effort, **non-blocking** (`continue-on-error`): boots postgres + redis + backend, applies migrations, and curls `/health` + `/ready`. Runs on push-to-main and manual dispatch only (skipped on PRs). |
+
+**Do not merge a PR while CI is failing.** The PR template
+(`.github/pull_request_template.md`) carries a pre-merge checklist, and
+`.github/dependabot.yml` opens weekly dependency PRs for `pip` and
+`github-actions`.
+
+Reproduce the core checks locally:
+
+```bash
+python -m compileall app migrations tests
+python -m pytest -q
+bash -n install.sh
+find scripts -name "*.sh" -type f -print0 | xargs -0 -r bash -n
+docker compose config
+```
+
 ## Environment
 
 `.env` is gitignored; `.env.example` is safe to commit. Copy and edit it:
