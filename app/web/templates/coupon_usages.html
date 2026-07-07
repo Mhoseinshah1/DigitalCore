@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.coupons.usages_title", code=coupon.code) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.coupons.usages_title", code=coupon.code) }}</h1>
+  <p class="muted"><a href="/admin/coupons">{{ _("web.coupons.back") }}</a> · {{ _("web.coupons.used_total", n=coupon.used_count) }}</p>
+</header>
+
+{% if not usages %}
+<section class="note"><p class="muted">{{ _("web.coupons.no_usages") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.coupons.usage.user") }}</th>
+        <th>{{ _("web.coupons.usage.order") }}</th>
+        <th>{{ _("web.coupons.usage.discount") }}</th>
+        <th>{{ _("web.coupons.usage.when") }}</th>
+      </tr></thead>
+      <tbody>
+        {% for u in usages %}
+        <tr>
+          <td><a href="/admin/users/{{ u.user_id }}">#{{ u.user_id }}</a></td>
+          <td class="muted small"><a href="/admin/orders/{{ u.order_id }}">#{{ u.order_id }}</a></td>
+          <td>{{ "{:,}".format(u.discount_amount) }}</td>
+          <td class="muted small">{{ u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

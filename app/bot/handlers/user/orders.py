@@ -26,6 +26,7 @@ from app.core.statuses import order_status_label
 from app.database import SessionLocal
 from app.i18n import t, texts_for
 from app.services import (
+    coupon_service,
     license_service,
     order_service,
     payment_service,
@@ -33,6 +34,7 @@ from app.services import (
     user_service,
     wallet_service,
 )
+from app.services.coupon_service import CouponError
 from app.services.order_service import OrderError
 from app.services.payment_service import ReceiptError, ReceiptFile
 
@@ -47,13 +49,25 @@ CB_BUY = "ubuy:"
 
 class PurchaseStates(StatesGroup):
     waiting_for_receipt = State()
+    waiting_for_coupon = State()
+
+
+CB_COUPON_ENTER = "ucpn_e:"   # user wants to type a coupon code
+CB_COUPON_SKIP = "ucpn_s:"    # continue without a coupon
+
+
+def _coupon_error_text(exc: CouponError, _: Callable[..., str]) -> str:
+    key = f"coupon.err.{exc.code}"
+    text = _(key)
+    return text if text != key else _("coupon.err.generic")
 
 
 # Menu buttons/commands that must never be swallowed by the receipt-wait guidance.
 _NAV_TEXTS: set[str] = set()
 for _key in ("btn.products", "btn.account", "btn.support", "btn.rules",
              "btn.language", "btn.admin_panel", "btn.my_orders", "btn.my_licenses",
-             "btn.my_services"):
+             "btn.my_services", "btn.wallet", "btn.tutorials", "btn.my_tickets",
+             "btn.referral"):
     _NAV_TEXTS |= texts_for(_key)
 
 
@@ -76,6 +90,12 @@ def _payment_instruction_lines(order, product, cfg: dict[str, str], _: Callable[
         "",
         _("purchase.order_number", number=order.order_number),
         _("purchase.product", title=product.title),
+    ]
+    if order.discount_amount:
+        lines.append(_("purchase.original_amount", amount=f"{order.amount:,}"))
+        lines.append(_("purchase.discount", code=order.coupon_code or "",
+                       amount=f"{order.discount_amount:,}"))
+    lines += [
         _("purchase.amount", amount=f"{order.final_amount:,}"),
         "",
         _("purchase.pay_header"),
@@ -95,13 +115,29 @@ CB_PAY_CARD = "upayc:"
 CB_PAY_WALLET = "upayw:"
 
 
+async def _apply_coupon_best_effort(session, order_id: int, coupon_code: str | None,
+                                    user_id: int) -> None:
+    """Apply a stashed coupon to a fresh order; on any coupon error, proceed at
+    full price (the prompt already validated it — this guards a late change)."""
+    if not coupon_code:
+        return
+    try:
+        await coupon_service.apply_coupon_to_order(session, order_id, coupon_code, user_id)
+        await session.commit()
+    except CouponError:
+        await session.rollback()
+
+
 async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., str],
                               state: FSMContext, *, action_type: str | None = None,
-                              target_service_id: int | None = None) -> None:
+                              target_service_id: int | None = None,
+                              coupon_code: str | None = None) -> None:
     """Create the card-to-card order + payment and show the transfer instructions.
 
     Extracted so the payment-method picker can reuse it. A renew/add-traffic order
-    (Phase 8) passes ``action_type`` + ``target_service_id`` through to create_order.
+    (Phase 8) passes ``action_type`` + ``target_service_id``; a coupon (Phase 10)
+    is applied to the order before the Payment is created so the instructions and
+    Payment.amount both reflect the discounted final_amount.
     """
     async with SessionLocal() as session:
         svc = SettingsService(session)
@@ -129,12 +165,16 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
             order = await order_service.create_order(
                 session, user.id, product_id, action_type=action_type,
                 target_service_id=target_service_id)
-            await payment_service.create_payment_for_order(session, order)
             await session.commit()
         except OrderError as exc:
             if reply is not None:
                 await reply.answer(_order_error_text(exc, _))
             return
+        # Apply the coupon (discounts final_amount) BEFORE the Payment is created.
+        await _apply_coupon_best_effort(session, order.id, coupon_code, user.id)
+        order = await order_service.get_order(session, order.id)
+        await payment_service.create_payment_for_order(session, order)
+        await session.commit()
         product = await product_service.get(session, product_id)
         lines = _payment_instruction_lines(order, product, cfg, _)
         order_id = order.id
@@ -153,12 +193,13 @@ def _topup_button(_: Callable[..., str]) -> InlineKeyboardMarkup:
 
 async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str], bot,
                            *, action_type: str | None = None,
-                           target_service_id: int | None = None) -> None:
+                           target_service_id: int | None = None,
+                           coupon_code: str | None = None) -> None:
     """Charge the wallet for the product, then run the existing delivery flow.
 
     A renew/add-traffic order (Phase 8) passes ``action_type`` +
-    ``target_service_id`` through to create_order; delivery then routes to the
-    lifecycle service, which sends its own action-specific confirmation."""
+    ``target_service_id``; a coupon (Phase 10) discounts the order before the
+    balance check + charge, so the wallet is charged the discounted final_amount."""
     async with SessionLocal() as session:
         user, _created = await user_service.create_or_update_from_telegram(
             session, telegram_id=tg_user.id, username=tg_user.username,
@@ -170,14 +211,6 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
             if reply is not None:
                 await reply.answer(_("purchase.error", error="product"))
             return
-        price = int(product.price or 0)
-        balance = await wallet_service.get_balance(session, user.id)
-        if balance < price:
-            if reply is not None:
-                await reply.answer(
-                    _("purchase.wallet.insufficient", balance=f"{balance:,}", amount=f"{price:,}"),
-                    reply_markup=_topup_button(_))
-            return
         try:
             order = await order_service.create_order(
                 session, user.id, product_id, payment_method="wallet",
@@ -186,6 +219,17 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
         except OrderError as exc:
             if reply is not None:
                 await reply.answer(_order_error_text(exc, _))
+            return
+        # Apply the coupon, then check the balance against the discounted amount.
+        await _apply_coupon_best_effort(session, order.id, coupon_code, user.id)
+        order = await order_service.get_order(session, order.id)
+        amount = int(order.final_amount or 0)
+        balance = await wallet_service.get_balance(session, user.id)
+        if balance < amount:
+            if reply is not None:
+                await reply.answer(
+                    _("purchase.wallet.insufficient", balance=f"{balance:,}", amount=f"{amount:,}"),
+                    reply_markup=_topup_button(_))
             return
         try:
             result = await wallet_service.pay_order_with_wallet(
@@ -196,7 +240,7 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
             bal = await wallet_service.get_balance(session, user.id)
             if reply is not None:
                 await reply.answer(
-                    _("purchase.wallet.insufficient", balance=f"{bal:,}", amount=f"{price:,}"),
+                    _("purchase.wallet.insufficient", balance=f"{bal:,}", amount=f"{amount:,}"),
                     reply_markup=_topup_button(_))
             return
         except wallet_service.WalletError as exc:
@@ -215,23 +259,17 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
                            parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith(CB_BUY))
-async def on_buy(
-    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
-) -> None:
-    """Offer the payment-method picker, or go straight to the only enabled method."""
-    product_id = int((callback.data or "0")[len(CB_BUY):])
-    reply = callback.message
+async def _offer_payment_methods(reply, tg_user, product_id: int, _: Callable[..., str],
+                                 state: FSMContext, bot, *, coupon_code: str | None) -> None:
+    """Show the card/wallet picker, or go straight to the only enabled method.
+    The chosen coupon is stashed in FSM so the picker callbacks can read it."""
     async with SessionLocal() as session:
         svc = SettingsService(session)
-        if not await svc.get_bool("sales_enabled", True):
-            await callback.answer(_("purchase.sales_disabled"), show_alert=True)
-            return
         card_ok = (await svc.get_bool("card_to_card_enabled", True)
                    and bool((await svc.get_str("card_number", "")).strip()))
         wallet_ok = (await svc.get_bool("wallet_enabled", True)
                      and await svc.get_bool("wallet_payment_enabled", True))
-    await callback.answer()
+    await state.update_data(buy_product_id=product_id, buy_coupon=coupon_code)
     if wallet_ok and card_ok:
         if reply is not None:
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -243,9 +281,110 @@ async def on_buy(
             await reply.answer(_("purchase.choose_method"), reply_markup=kb)
         return
     if wallet_ok:
-        await _pay_with_wallet(reply, callback.from_user, product_id, _, bot)
+        await _pay_with_wallet(reply, tg_user, product_id, _, bot, coupon_code=coupon_code)
         return
-    await _start_card_payment(reply, callback.from_user, product_id, _, state)
+    await _start_card_payment(reply, tg_user, product_id, _, state, coupon_code=coupon_code)
+
+
+@router.callback_query(F.data.startswith(CB_BUY))
+async def on_buy(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """Ask about a coupon first (if enabled), then offer the payment methods."""
+    product_id = int((callback.data or "0")[len(CB_BUY):])
+    reply = callback.message
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not await svc.get_bool("sales_enabled", True):
+            await callback.answer(_("purchase.sales_disabled"), show_alert=True)
+            return
+        coupons_on = await svc.get_bool("coupons_enabled", True)
+        product = await product_service.get(session, product_id)
+    await callback.answer()
+    if product is None:
+        return
+    await state.set_state(None)
+    await state.update_data(buy_product_id=product_id, buy_coupon=None)
+    if coupons_on and reply is not None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("coupon.btn.enter"),
+                                  callback_data=f"{CB_COUPON_ENTER}{product_id}")],
+            [InlineKeyboardButton(text=_("coupon.btn.skip"),
+                                  callback_data=f"{CB_COUPON_SKIP}{product_id}")],
+        ])
+        await reply.answer(
+            _("coupon.prompt", price=f"{int(product.price or 0):,}"), reply_markup=kb)
+        return
+    await _offer_payment_methods(reply, callback.from_user, product_id, _, state,
+                                 bot, coupon_code=None)
+
+
+@router.callback_query(F.data.startswith(CB_COUPON_SKIP))
+async def on_coupon_skip(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_COUPON_SKIP):])
+    await state.set_state(None)
+    await callback.answer()
+    await _offer_payment_methods(callback.message, callback.from_user, product_id, _, state,
+                                 bot, coupon_code=None)
+
+
+@router.callback_query(F.data.startswith(CB_COUPON_ENTER))
+async def on_coupon_enter(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_COUPON_ENTER):])
+    await state.update_data(buy_product_id=product_id)
+    await state.set_state(PurchaseStates.waiting_for_coupon)
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.answer(_("coupon.ask_code"))
+
+
+@router.message(PurchaseStates.waiting_for_coupon, F.text, ~F.text.startswith("/"),
+                ~F.text.in_(_NAV_TEXTS))
+async def on_coupon_code(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    data = await state.get_data()
+    product_id = data.get("buy_product_id")
+    if not product_id:
+        await state.clear()
+        return
+    code = (message.text or "").strip()
+    tg = message.from_user
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg.id)
+        product = await product_service.get(session, product_id)
+        if product is None:
+            await state.clear()
+            return
+        try:
+            coupon, discount = await coupon_service.validate_coupon(
+                session, code, (user.id if user else 0), product_id,
+                int(product.price or 0), action_type="new_purchase")
+        except CouponError as exc:
+            # Show the error and offer to retry or continue without a coupon.
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text=_("coupon.btn.skip"), callback_data=f"{CB_COUPON_SKIP}{product_id}")]])
+            await message.answer(_coupon_error_text(exc, _), reply_markup=kb)
+            return
+        price = int(product.price or 0)
+        final = max(0, price - discount)
+        norm_code = coupon.code
+    await state.set_state(None)
+    await state.update_data(buy_coupon=norm_code)
+    await message.answer(_("coupon.applied", code=norm_code, original=f"{price:,}",
+                           discount=f"{discount:,}", final=f"{final:,}"))
+    await _offer_payment_methods(message, tg, product_id, _, state, bot, coupon_code=norm_code)
+
+
+async def _stashed_coupon(state: FSMContext, product_id: int) -> str | None:
+    data = await state.get_data()
+    if data.get("buy_product_id") == product_id:
+        return data.get("buy_coupon")
+    return None
 
 
 @router.callback_query(F.data.startswith(CB_PAY_CARD))
@@ -253,17 +392,21 @@ async def on_pay_card(
     callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
     product_id = int((callback.data or "0")[len(CB_PAY_CARD):])
+    coupon_code = await _stashed_coupon(state, product_id)
     await callback.answer()
-    await _start_card_payment(callback.message, callback.from_user, product_id, _, state)
+    await _start_card_payment(callback.message, callback.from_user, product_id, _, state,
+                              coupon_code=coupon_code)
 
 
 @router.callback_query(F.data.startswith(CB_PAY_WALLET))
 async def on_pay_wallet(
-    callback: CallbackQuery, bot: Bot, _: Callable[..., str], lang: str = "fa"
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
     product_id = int((callback.data or "0")[len(CB_PAY_WALLET):])
+    coupon_code = await _stashed_coupon(state, product_id)
     await callback.answer()
-    await _pay_with_wallet(callback.message, callback.from_user, product_id, _, bot)
+    await _pay_with_wallet(callback.message, callback.from_user, product_id, _, bot,
+                           coupon_code=coupon_code)
 
 
 # --------------------------------------------------------------------------
@@ -365,6 +508,34 @@ async def on_action_pick(
     action_type, service_id, product_id = parsed
     await _start_action_payment(
         callback.message, callback.from_user, action_type, service_id, product_id, _, state, bot)
+
+
+@router.message(Command("coupons"))
+@router.message(F.text.in_(texts_for("btn.coupons")))
+async def on_coupons(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """List public active coupons, if the operator enabled that."""
+    await state.clear()
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not (await svc.get_bool("coupons_enabled", True)
+                and await svc.get_bool("show_public_coupons", False)):
+            await message.answer(_("coupon.public.disabled"))
+            return
+        coupons = await coupon_service.list_public_coupons(session)
+    if not coupons:
+        await message.answer(_("coupon.public.empty"))
+        return
+    lines = [_("coupon.public.title"), ""]
+    for c in coupons:
+        if c.discount_type == "percent":
+            value = _("coupon.public.percent", pct=c.discount_value)
+        else:
+            value = _("coupon.public.fixed", amount=f"{int(c.discount_value):,}")
+        lines.append(_("coupon.public.row", code=c.code, value=value,
+                       title=(c.title or "")))
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def _download_telegram_file(bot: Bot, file_id: str) -> bytes:

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.coupons.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.coupons.title") }}</h1>
+  <p class="muted">{{ _("web.coupons.subtitle") }}{% if can_manage %} · <a href="/admin/coupons/create">{{ _("web.coupons.create") }}</a>{% endif %}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.coupons.flash." ~ saved) if saved in ("created","updated","deactivated") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if not coupons %}
+<section class="note"><p class="muted">{{ _("web.coupons.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.coupons.col.code") }}</th>
+        <th>{{ _("web.coupons.col.value") }}</th>
+        <th>{{ _("web.coupons.col.status") }}</th>
+        <th>{{ _("web.coupons.col.usage") }}</th>
+        <th>{{ _("web.coupons.col.expires") }}</th>
+        <th>{{ _("web.coupons.col.restriction") }}</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for c in coupons %}
+        <tr>
+          <td><code>{{ c.code }}</code>{% if c.title %} · {{ c.title }}{% endif %}</td>
+          <td>{% if c.discount_type == "percent" %}{{ c.discount_value }}%{% else %}{{ "{:,}".format(c.discount_value) }}{% endif %}</td>
+          <td>{% if c.is_active %}<span class="pill ok">{{ _("web.coupons.active") }}</span>{% else %}<span class="pill">{{ _("web.coupons.inactive") }}</span>{% endif %}</td>
+          <td class="muted small">{{ c.used_count }}{% if c.usage_limit %} / {{ c.usage_limit }}{% endif %}</td>
+          <td class="muted small">{{ c.expires_at.strftime("%Y-%m-%d") if c.expires_at else "—" }}</td>
+          <td class="muted small">
+            {%- if c.product_id %}#{{ c.product_id }}{% elif c.product_type %}{{ c.product_type }}{% else %}—{% endif -%}
+            {%- if c.applies_to_action %} · {{ c.applies_to_action }}{% endif -%}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/admin/coupons/{{ c.id }}/usages">{{ _("web.coupons.usages") }}</a>
+            {% if can_manage %}
+            <a class="btn small" href="/admin/coupons/{{ c.id }}/edit">{{ _("web.coupons.edit") }}</a>
+            {% if c.is_active %}
+            <form method="post" action="/admin/coupons/{{ c.id }}/deactivate" style="display:inline">
+              <button type="submit" class="btn small danger">{{ _("web.coupons.deactivate") }}</button>
+            </form>
+            {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

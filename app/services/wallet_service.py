@@ -422,10 +422,24 @@ async def pay_order_with_wallet(
     # releases the user-row lock, BEFORE running delivery.
     await session.commit()
 
+    # Consume the coupon now that the order is paid (idempotent + race-safe).
+    from app.services import coupon_service, delivery_service, referral_service
+    try:
+        if await coupon_service.record_usage(session, order.id):
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - coupon accounting never blocks delivery
+        log.warning("coupon usage record failed for order %s: %s", order.id, exc)
+
     # Reuse the existing delivery dispatcher (license sell / v2ray provision).
-    from app.services import delivery_service
     delivery = await delivery_service.deliver_order(session, order, actor_id=actor_id, bot=bot)
     await session.commit()
+
+    # Mint a referral reward for a qualifying first paid order (idempotent).
+    try:
+        await referral_service.create_reward_for_order(session, order.id, bot=bot)
+    except Exception as exc:  # noqa: BLE001 - reward creation never blocks the purchase
+        log.warning("referral reward creation failed for order %s: %s", order.id, exc)
+
     await session.refresh(order)
     return {"ok": True, "already": False, "charged": True, "order_id": order.id,
             "amount": amount, "balance": int(user.wallet_balance or 0), "delivery": delivery}

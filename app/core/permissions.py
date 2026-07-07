@@ -55,6 +55,10 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_tickets",          # see ticket pages (read-only)
         "manage_tickets",        # reply / close / assign / set priority
         "manage_tutorials",      # create / edit / toggle tutorials + categories
+        # Phase 10 — coupons + referrals.
+        "view_coupons",          # see coupon pages + usages (read-only)
+        "manage_coupons",        # create / edit / deactivate coupons
+        "manage_referrals",      # see referrals + approve / reject / pay rewards
     }
 )
 
@@ -92,29 +96,34 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_tickets",
             "manage_tickets",
             "manage_tutorials",
+            "view_coupons",
+            "manage_coupons",
+            "manage_referrals",
         }
     ),
     # Support: view users, block/restrict them, view license status (no secrets,
     # no import); view v2ray services + refresh usage; view wallet top-ups (no
-    # approve); front-line support MANAGES tickets (reply/close/assign/priority).
+    # approve); front-line support MANAGES tickets (reply/close/assign/priority);
+    # can VIEW coupons (read-only).
     Role.SUPPORT: frozenset(
         {"view_dashboard", "view_users", "manage_users", "block_users",
          "restrict_users", "view_licenses", "view_services", "view_wallet_topups",
-         "view_tickets", "manage_tickets"}
+         "view_tickets", "manage_tickets", "view_coupons"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; approve /
-    # reject wallet top-ups and refund payments; can VIEW tickets but not manage
-    # them; cannot change bot texts or block/restrict users.
+    # reject wallet top-ups and refund payments; can VIEW tickets + coupon usages
+    # and MANAGE referral rewards (a wallet payout); cannot change bot texts or
+    # block/restrict users.
     Role.ACCOUNTANT: frozenset(
         {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
          "approve_payments", "process_payments", "view_licenses", "view_services",
          "view_wallet_topups", "manage_wallet_topups", "refund_payments",
-         "view_tickets"}
+         "view_tickets", "view_coupons", "manage_referrals"}
     ),
-    # Viewer: read-only dashboard + users + license/service/wallet counts + tickets.
+    # Viewer: read-only dashboard + users + license/service/wallet/ticket/coupon counts.
     Role.VIEWER: frozenset(
         {"view_dashboard", "view_users", "view_licenses", "view_services",
-         "view_wallet_topups", "view_tickets"}
+         "view_wallet_topups", "view_tickets", "view_coupons"}
     ),
 }
 
@@ -258,3 +267,16 @@ def can_manage_tickets(role: object) -> bool:
 
 def can_manage_tutorials(role: object) -> bool:
     return has_permission(role, "manage_tutorials")
+
+
+def can_view_coupons(role: object) -> bool:
+    return has_permission(role, "view_coupons")
+
+
+def can_manage_coupons(role: object) -> bool:
+    return has_permission(role, "manage_coupons")
+
+
+def can_manage_referrals(role: object) -> bool:
+    """See referrals + approve / reject / pay referral rewards."""
+    return has_permission(role, "manage_referrals")

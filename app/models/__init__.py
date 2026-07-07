@@ -16,6 +16,9 @@ from app.models.wallet_topup import WalletTopupRequest
 from app.models.ticket import Ticket
 from app.models.ticket_message import TicketMessage
 from app.models.tutorial import Tutorial, TutorialCategory
+from app.models.coupon import Coupon
+from app.models.coupon_usage import CouponUsage
+from app.models.referral_reward import ReferralReward
 
 __all__ = [
     "Base",
@@ -36,4 +39,7 @@ __all__ = [
     "TicketMessage",
     "Tutorial",
     "TutorialCategory",
+    "Coupon",
+    "CouponUsage",
+    "ReferralReward",
 ]

@@ -116,6 +116,9 @@ async def _seed_product(maker, *, card="6037-0000-0000-0000") -> int:
         # These tests isolate the card-to-card flow; wallet payment is exercised
         # in tests/test_wallet_bot.py, so turn it off here to bypass the picker.
         s.add(Setting(key="wallet_payment_enabled", value="false"))
+        # The coupon prompt (Phase 10) is exercised in tests/test_marketing_bot.py;
+        # turn it off here so on_buy goes straight to the card-to-card flow.
+        s.add(Setting(key="coupons_enabled", value="false"))
         p = Product(type="license", title="Gold Key", price=120000,
                     is_active=True, is_hidden=False)
         s.add(p)

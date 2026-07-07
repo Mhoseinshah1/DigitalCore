@@ -146,6 +146,67 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   read them from `/tutorials`, and a **connection-guide button** appears under a
   V2Ray delivery. **Not** in this phase: coupons, referrals, reseller, reports,
   online payment gateway, Marzban / Hiddify adapters, backup changes.
+- **Phase 10 — done.** **Coupons + referrals.** **Discount coupons** (percent or
+  fixed, with caps, min-order, per-coupon + per-user limits, date windows, and
+  product / product-type / action restrictions) are applied in the bot buy flow:
+  the user is asked *"کد تخفیف دارید؟"*, and a valid code discounts `final_amount`
+  before the payment-method picker — wallet charges and card-to-card instructions
+  both show the discounted total. Codes are normalized (UPPERCASE) and validated
+  server-side; a coupon is **consumed** (used_count bumped, `CouponUsage` written)
+  only when the order is paid, under a coupon row lock and guarded by a unique
+  `(coupon_id, order_id)` — no double-usage (proven under Postgres concurrency).
+  **Referrals**: each user gets a `t.me/<bot>?start=ref_<code>` link (`/referral`
+  shows it + stats); the first `/start ref_<code>` attaches the referrer (never
+  self, never overwritten). When a referred user's first delivered order clears
+  the minimum, a **reward** is minted for the referrer — auto-paid to their wallet
+  or left `pending` for admin approval per settings, idempotent via a unique
+  `order_id` + row lock (no double reward, proven under Postgres concurrency).
+  Admins get **Marketing** pages: `/admin/coupons` (CRUD + usages),
+  `/admin/referrals`, and `/admin/referral-rewards` (approve / pay / reject).
+  **Not** in this phase: reseller, reports dashboard, online payment gateway,
+  Marzban / Hiddify adapters, backup changes.
+
+### Phase 10 — coupons & referrals
+
+**Coupons** (`app/services/coupon_service.py`, `coupons` + `coupon_usages`,
+migration 0017). A coupon carries a percent (1–100, optionally capped by
+`max_discount_amount`) or fixed discount, `min_order_amount`, `usage_limit` +
+`usage_limit_per_user`, a `starts_at`/`expires_at` window, and optional
+restrictions (`product_id`, `product_type` ∈ license/v2ray, `applies_to_action`
+∈ new_purchase/renew_service/add_traffic). `validate_coupon` returns a precise
+error code (`coupon_not_found`, `coupon_expired`, `usage_limit_reached`,
+`min_order_amount_not_met`, `product_type_not_allowed`, …); `apply_coupon_to_order`
+sets `final_amount = amount − discount` on a still-pending order (frozen once a
+receipt is submitted / payment approved), and `record_usage` consumes it on
+payment — race-safe + idempotent. Wallet payment charges `final_amount`; the
+card-to-card instructions and the admin order page both show the coupon + discount.
+
+**Referrals** (`app/services/referral_service.py`, `referral_rewards`; `users`
+gains `referral_code` + `referral_registered_at`, reusing the existing
+`referrer_id`). `register_referral` is safe/idempotent (ignores invalid / self,
+never overwrites). `create_reward_for_order` runs after a paid order is
+**delivered** (hooked in both the wallet-pay and card-approve paths), honours
+`referral_reward_first_order_only` + `referral_min_order_amount`, computes a fixed
+or percent reward, and either auto-pays it to the referrer's wallet (a `reward`
+wallet transaction) or leaves it `pending`. Admin approve/pay/reject are a
+row-locked, status-guarded wallet payout that never double-credits.
+
+| Area | Routes / commands |
+|------|-------------------|
+| Bot user | Buy → coupon prompt (enter / skip) → discounted method picker; `/coupons` (public list); `/referral`, دعوت دوستان (link + code + stats); `/start ref_<code>` |
+| Web coupons | `GET /admin/coupons` (+ `/create`, `/{id}/edit`, `/{id}/usages`), `POST /admin/coupons/{create,{id}/edit,{id}/deactivate}` |
+| Web referrals | `GET /admin/referrals`, `GET /admin/referral-rewards`, `POST /admin/referral-rewards/{id}/{approve,pay,reject}` |
+
+**Settings** (Marketing): `coupons_enabled`, `show_public_coupons`,
+`referrals_enabled`, `referral_reward_enabled`, `referral_reward_type`,
+`referral_reward_value`, `referral_reward_requires_admin_approval`,
+`referral_reward_first_order_only`, `referral_min_order_amount`.
+**Permissions**: `view_coupons` (list/usages — owner/admin/support/accountant/viewer),
+`manage_coupons` (CRUD — owner/admin), `manage_referrals` (reward approve/pay/reject —
+owner/admin/accountant). All coupon validation is server-side; users cannot touch
+another user's order coupon flow or self-refer. Audited: `coupon_created/_updated/
+_deactivated/_applied/_removed/_consumed`, `referral_registered`,
+`referral_reward_created/_approved/_rejected/_paid`.
 
 ### Phase 9 — support tickets & tutorials
 
@@ -820,6 +881,23 @@ rows (idempotent; never overwrites custom values).
     under the delivery message and opens the tutorial.
 12. Toggle the tutorial inactive and confirm it disappears from the bot.
 13. Confirm audit rows exist for ticket + tutorial actions and no secrets leak.
+
+## Phase 10 manual test checklist
+
+1. Admin creates a **percent** coupon at `/admin/coupons/create`.
+2. In the bot, buy a product → tap **enter a discount code** → apply it.
+3. Confirm the final amount is discounted (bot shows original / discount / final).
+4. Pay by **wallet** and confirm the wallet is charged the discounted amount.
+5. Repeat with **card-to-card** and confirm the instructions show the discounted total.
+6. Confirm the coupon's usage count increases after the order is paid.
+7. Create an expired or product-restricted coupon and confirm it is rejected.
+8. Enable referral rewards; open `/referral` and copy the invite link.
+9. Start the bot from a second account via the referral link.
+10. Complete the referred account's first purchase through to delivery.
+11. Confirm a referral reward is created; with auto-payout, the referrer's wallet
+    increases; with approval required, approve it at `/admin/referral-rewards`.
+12. Confirm no duplicate reward is created for the same order.
+13. Confirm audit rows exist for coupon + referral actions and no secrets leak.
 
 ## CI / GitHub Actions
 

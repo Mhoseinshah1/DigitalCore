@@ -14,6 +14,7 @@ from app.bot.handlers.admin import xui as admin_xui
 from app.bot.handlers.user import language as user_language
 from app.bot.handlers.user import orders as user_orders
 from app.bot.handlers.user import products as user_products
+from app.bot.handlers.user import referral as user_referral
 from app.bot.handlers.user import rules as user_rules
 from app.bot.handlers.user import services as user_services
 from app.bot.handlers.user import start as user_start
@@ -66,4 +67,5 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(user_orders.router)
     dp.include_router(user_services.router)
     dp.include_router(user_tutorials.router)
+    dp.include_router(user_referral.router)
     return dp

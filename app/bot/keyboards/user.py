@@ -12,7 +12,8 @@ def user_main_menu(lang: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=t("btn.my_licenses", lang)), KeyboardButton(text=t("btn.my_services", lang))],
         [KeyboardButton(text=t("btn.wallet", lang)), KeyboardButton(text=t("btn.account", lang))],
         [KeyboardButton(text=t("btn.support", lang)), KeyboardButton(text=t("btn.tutorials", lang))],
-        [KeyboardButton(text=t("btn.rules", lang)), KeyboardButton(text=t("btn.language", lang))],
+        [KeyboardButton(text=t("btn.referral", lang)), KeyboardButton(text=t("btn.rules", lang))],
+        [KeyboardButton(text=t("btn.language", lang))],
     ]
     if is_admin:
         rows.append([KeyboardButton(text=t("btn.admin_panel", lang))])

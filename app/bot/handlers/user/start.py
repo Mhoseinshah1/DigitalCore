@@ -5,14 +5,14 @@ import logging
 from collections.abc import Callable
 
 from aiogram import Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import Message
 
 from app.bot.handlers.user.language import language_picker_keyboard
 from app.bot.keyboards.user import user_main_menu
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
-from app.services import audit_service, user_service
+from app.services import audit_service, referral_service, user_service
 
 log = logging.getLogger("bot.start")
 
@@ -21,7 +21,8 @@ router = Router(name="user.start")
 
 @router.message(CommandStart())
 async def on_start(
-    message: Message, _: Callable[..., str], lang: str = "fa", is_admin: bool = False
+    message: Message, _: Callable[..., str], command: CommandObject | None = None,
+    lang: str = "fa", is_admin: bool = False
 ) -> None:
     tg_user = message.from_user
     if tg_user is None:
@@ -45,6 +46,15 @@ async def on_start(
                 target_type="user",
                 target_id=user.id,
             )
+        # Referral deep link (Phase 10): /start ref_<code>. Safe/idempotent —
+        # ignores an invalid code / self-referral and never overwrites a referrer.
+        ref_code = referral_service.parse_start_code(command.args if command else None)
+        if ref_code:
+            try:
+                if await referral_service.register_referral(session, user.id, ref_code):
+                    await session.commit()
+            except Exception as exc:  # noqa: BLE001 - referral must never block /start
+                log.info("referral registration skipped: %s", exc)
         start_text = await SettingsService(session).get_str("start_text", "")
 
     if created:

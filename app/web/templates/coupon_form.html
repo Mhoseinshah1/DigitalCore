@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}{% if coupon %}{{ _("web.coupons.edit_title") }}{% else %}{{ _("web.coupons.create_title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if coupon %}{{ _("web.coupons.edit_title") }}{% else %}{{ _("web.coupons.create_title") }}{% endif %}</h1>
+  <p class="muted"><a href="/admin/coupons">{{ _("web.coupons.back") }}</a></p>
+</header>
+
+<form method="post"
+      action="{% if coupon %}/admin/coupons/{{ coupon.id }}/edit{% else %}/admin/coupons/create{% endif %}"
+      class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="code">{{ _("web.coupons.form.code") }}</label>
+        <input id="code" name="code" type="text" required value="{{ coupon.code if coupon else '' }}">
+      </div>
+      <div class="field">
+        <label for="title">{{ _("web.coupons.form.title") }}</label>
+        <input id="title" name="title" type="text" value="{{ coupon.title or '' if coupon else '' }}">
+      </div>
+      <div class="field">
+        <label for="discount_type">{{ _("web.coupons.form.discount_type") }}</label>
+        <select id="discount_type" name="discount_type">
+          <option value="percent" {% if coupon and coupon.discount_type == "percent" %}selected{% endif %}>{{ _("web.coupons.type.percent") }}</option>
+          <option value="fixed" {% if coupon and coupon.discount_type == "fixed" %}selected{% endif %}>{{ _("web.coupons.type.fixed") }}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="discount_value">{{ _("web.coupons.form.discount_value") }}</label>
+        <input id="discount_value" name="discount_value" type="number" min="0" required
+               value="{{ coupon.discount_value if coupon else '' }}">
+      </div>
+      <div class="field">
+        <label for="max_discount_amount">{{ _("web.coupons.form.max_discount") }}</label>
+        <input id="max_discount_amount" name="max_discount_amount" type="number" min="0"
+               value="{{ coupon.max_discount_amount if coupon and coupon.max_discount_amount is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="min_order_amount">{{ _("web.coupons.form.min_order") }}</label>
+        <input id="min_order_amount" name="min_order_amount" type="number" min="0"
+               value="{{ coupon.min_order_amount if coupon and coupon.min_order_amount is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="usage_limit">{{ _("web.coupons.form.usage_limit") }}</label>
+        <input id="usage_limit" name="usage_limit" type="number" min="0"
+               value="{{ coupon.usage_limit if coupon and coupon.usage_limit is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="usage_limit_per_user">{{ _("web.coupons.form.usage_limit_per_user") }}</label>
+        <input id="usage_limit_per_user" name="usage_limit_per_user" type="number" min="0"
+               value="{{ coupon.usage_limit_per_user if coupon and coupon.usage_limit_per_user is not none else '' }}">
+      </div>
+      <div class="field">
+        <label for="starts_at">{{ _("web.coupons.form.starts_at") }}</label>
+        <input id="starts_at" name="starts_at" type="datetime-local"
+               value="{{ coupon.starts_at.strftime('%Y-%m-%dT%H:%M') if coupon and coupon.starts_at else '' }}">
+      </div>
+      <div class="field">
+        <label for="expires_at">{{ _("web.coupons.form.expires_at") }}</label>
+        <input id="expires_at" name="expires_at" type="datetime-local"
+               value="{{ coupon.expires_at.strftime('%Y-%m-%dT%H:%M') if coupon and coupon.expires_at else '' }}">
+      </div>
+      <div class="field">
+        <label for="product_id">{{ _("web.coupons.form.product") }}</label>
+        <select id="product_id" name="product_id">
+          <option value="">{{ _("web.coupons.form.any_product") }}</option>
+          {% for p in products %}
+          <option value="{{ p.id }}" {% if coupon and coupon.product_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="product_type">{{ _("web.coupons.form.product_type") }}</label>
+        <select id="product_type" name="product_type">
+          {% for pt in product_types %}
+          <option value="{{ pt }}" {% if coupon and (coupon.product_type or 'any') == pt %}selected{% endif %}>{{ pt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="applies_to_action">{{ _("web.coupons.form.action") }}</label>
+        <select id="applies_to_action" name="applies_to_action">
+          {% for a in actions %}
+          <option value="{{ a }}" {% if coupon and (coupon.applies_to_action or 'any') == a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="is_active" {% if not coupon or coupon.is_active %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.coupons.form.is_active") }}</span>
+        </label>
+      </div>
+      <div class="field field-text">
+        <label for="description">{{ _("web.coupons.form.description") }}</label>
+        <textarea id="description" name="description" rows="2">{{ coupon.description or '' if coupon else '' }}</textarea>
+      </div>
+    </div>
+  </section>
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.coupons.form.save") }}</button>
+    <a class="btn" href="/admin/coupons">{{ _("web.coupons.form.cancel") }}</a>
+  </div>
+</form>
+{% endblock %}

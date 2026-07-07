@@ -15,6 +15,10 @@
     <dt>{{ _("web.order.field.number") }}</dt><dd><code>{{ order.order_number }}</code></dd>
     <dt>{{ _("web.order.field.status") }}</dt><dd><span class="pill">{{ row.order_status_label }}</span></dd>
     <dt>{{ _("web.order.field.payment_status") }}</dt><dd>{{ row.payment_status_label }}</dd>
+    {% if order.discount_amount %}
+    <dt>{{ _("web.order.field.original_amount") }}</dt><dd>{{ "{:,}".format(order.amount) }}</dd>
+    <dt>{{ _("web.order.field.coupon") }}</dt><dd><code>{{ order.coupon_code }}</code> · −{{ "{:,}".format(order.discount_amount) }}</dd>
+    {% endif %}
     <dt>{{ _("web.order.field.amount") }}</dt><dd>{{ "{:,}".format(order.final_amount) }}</dd>
     <dt>{{ _("web.order.field.method") }}</dt><dd>{{ _("web.orders.method." ~ order.payment_method) if order.payment_method in ("card_to_card", "wallet", "gateway") else order.payment_method }}</dd>
     {% if order.reject_reason %}<dt>{{ _("web.order.field.reject_reason") }}</dt><dd>{{ order.reject_reason }}</dd>{% endif %}

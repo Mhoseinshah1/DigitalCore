@@ -11,6 +11,7 @@ the serving layer re-validates containment to defeat path traversal.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.payment import Payment
 from app.services import audit_service, order_service
+
+log = logging.getLogger("payment")
 
 # storage/receipts/ at the repo root. Overridable in tests via monkeypatch.
 RECEIPTS_ROOT: Path = Path(__file__).resolve().parents[2] / "storage" / "receipts"
@@ -272,12 +275,26 @@ async def approve_payment(
         meta=f"order={order.order_number} payment_id={payment.id}",
     )
 
+    # Consume the coupon now that the receipt is approved (idempotent, race-safe).
+    from app.services import coupon_service, referral_service
+    try:
+        await coupon_service.record_usage(session, order.id)
+    except Exception as exc:  # noqa: BLE001 - coupon accounting never blocks delivery
+        log.warning("coupon usage record failed for order %s: %s", order.id, exc)
+
     delivery = {"delivered": False, "reason": "skipped"}
     if deliver:
         from app.services import delivery_service
         delivery = await delivery_service.deliver_order(
             session, order, actor_id=admin_id, bot=bot
         )
+
+    # Mint a referral reward for a qualifying first paid order (idempotent).
+    try:
+        await referral_service.create_reward_for_order(session, order.id, bot=bot)
+    except Exception as exc:  # noqa: BLE001 - reward creation never blocks the purchase
+        log.warning("referral reward creation failed for order %s: %s", order.id, exc)
+
     await session.refresh(order)
     return {"order": order, "payment": payment, "delivery": delivery}
 

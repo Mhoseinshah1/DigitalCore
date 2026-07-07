@@ -42,10 +42,12 @@ from app.core.statuses import (
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
+    coupon_service,
     license_service,
     order_service,
     payment_service,
     product_service,
+    referral_service,
     ticket_service,
     tutorial_service,
     user_service,
@@ -172,6 +174,17 @@ NAV_TREE: list[dict] = [
          "href": "/admin/tutorial-categories", "permission": "manage_tutorials"},
     ]},
 
+    {"label_key": "nav.marketing", "icon": "🏷", "children": [
+        {"label_key": "nav.marketing.coupons", "icon": "🏷", "href": "/admin/coupons",
+         "permission": "view_coupons"},
+        {"label_key": "nav.marketing.create_coupon", "icon": "➕",
+         "href": "/admin/coupons/create", "permission": "manage_coupons"},
+        {"label_key": "nav.marketing.referrals", "icon": "🔗", "href": "/admin/referrals",
+         "permission": "manage_referrals"},
+        {"label_key": "nav.marketing.rewards", "icon": "🎁",
+         "href": "/admin/referral-rewards", "permission": "manage_referrals"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -207,10 +220,6 @@ NAV_TREE: list[dict] = [
     {"label_key": "nav.future", "icon": "🧭", "children": [
         {"label_key": "nav.future.services", "icon": "🌐", "href": "/admin/services",
          "permission": "manage_products", "placeholder": True},
-        {"label_key": "nav.future.coupons", "icon": "🏷", "href": "/admin/coupons",
-         "permission": "manage_products", "placeholder": True},
-        {"label_key": "nav.future.referrals", "icon": "🔗", "href": "/admin/referrals",
-         "permission": "view_dashboard", "placeholder": True},
         {"label_key": "nav.future.backups", "icon": "💾", "href": "/admin/backups",
          "permission": "manage_settings", "placeholder": True},
         {"label_key": "nav.future.reports", "icon": "📊", "href": "/admin/reports",
@@ -227,8 +236,6 @@ PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
     ("/payments/wallet", "nav.payments.wallet", "view_payments"),
     ("/payments/receipts", "nav.payments.receipts", "view_payments"),
     ("/services", "nav.future.services", "manage_products"),
-    ("/coupons", "nav.future.coupons", "manage_products"),
-    ("/referrals", "nav.future.referrals", "view_dashboard"),
     ("/backups", "nav.future.backups", "manage_settings"),
     ("/reports", "nav.future.reports", "view_dashboard"),
 ]
@@ -2815,3 +2822,290 @@ async def tutorial_category_edit(
     except tutorial_service.TutorialError as exc:
         return _categories_back(error=str(exc))
     return _categories_back(saved="updated")
+
+
+# ==========================================================================
+# Marketing: coupons (Phase 10)
+#
+# List/usages need `view_coupons`; create/edit/deactivate need `manage_coupons`.
+# ==========================================================================
+def _parse_dt_opt(raw: object):
+    """Parse an <input type=datetime-local> value into a tz-aware UTC datetime."""
+    from datetime import datetime, timezone
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _coupon_form_values(form: dict) -> dict:
+    return {
+        "code": str(form.get("code", "")).strip(),
+        "title": (str(form.get("title", "")).strip() or None),
+        "description": (str(form.get("description", "")).strip() or None),
+        "discount_type": str(form.get("discount_type", "percent")).strip(),
+        "discount_value": _parse_int_opt(form.get("discount_value")) or 0,
+        "max_discount_amount": _parse_int_opt(form.get("max_discount_amount")),
+        "min_order_amount": _parse_int_opt(form.get("min_order_amount")),
+        "usage_limit": _parse_int_opt(form.get("usage_limit")),
+        "usage_limit_per_user": _parse_int_opt(form.get("usage_limit_per_user")),
+        "starts_at": _parse_dt_opt(form.get("starts_at")),
+        "expires_at": _parse_dt_opt(form.get("expires_at")),
+        "product_id": _parse_int_opt(form.get("product_id")),
+        "product_type": (str(form.get("product_type", "")).strip() or None),
+        "applies_to_action": (str(form.get("applies_to_action", "")).strip() or None),
+        "is_active": "is_active" in form,
+    }
+
+
+async def _coupon_form_ctx(session: AsyncSession) -> dict:
+    from app.models.coupon import COUPON_ACTIONS, COUPON_PRODUCT_TYPES
+    return {
+        "products": await product_service.list_for_admin(session),
+        "product_types": COUPON_PRODUCT_TYPES,
+        "actions": COUPON_ACTIONS,
+    }
+
+
+@router.get("/coupons", response_class=HTMLResponse)
+async def coupons_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_coupons")
+    if deny:
+        return deny
+    coupons = await coupon_service.list_coupons(session, limit=300)
+    return templates.TemplateResponse(
+        "coupons.html",
+        _ctx(request, admin, coupons=coupons,
+             can_manage=has_permission(admin.role, "manage_coupons"),
+             saved=saved, error=error),
+    )
+
+
+@router.get("/coupons/create", response_class=HTMLResponse)
+async def coupon_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_coupons")
+    if deny:
+        return deny
+    return templates.TemplateResponse(
+        "coupon_form.html",
+        _ctx(request, admin, coupon=None, error="", **await _coupon_form_ctx(session)),
+    )
+
+
+def _coupons_back(*, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/coupons?{q}", status_code=303)
+
+
+@router.post("/coupons/create")
+async def coupon_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_coupons")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        await coupon_service.create_coupon(session, admin_id=admin.id, **_coupon_form_values(form))
+        await session.commit()
+    except coupon_service.CouponError as exc:
+        return _coupons_back(error=str(exc))
+    return _coupons_back(saved="created")
+
+
+@router.get("/coupons/{coupon_id}/edit", response_class=HTMLResponse)
+async def coupon_edit_page(
+    coupon_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_coupons")
+    if deny:
+        return deny
+    coupon = await coupon_service.get_coupon(session, coupon_id)
+    if coupon is None:
+        return RedirectResponse("/admin/coupons", status_code=302)
+    return templates.TemplateResponse(
+        "coupon_form.html",
+        _ctx(request, admin, coupon=coupon, error="", **await _coupon_form_ctx(session)),
+    )
+
+
+@router.post("/coupons/{coupon_id}/edit")
+async def coupon_edit_submit(
+    coupon_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_coupons")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        updated = await coupon_service.update_coupon(
+            session, coupon_id, admin_id=admin.id, **_coupon_form_values(form))
+        if updated is None:
+            return _coupons_back(error="not found")
+        await session.commit()
+    except coupon_service.CouponError as exc:
+        return _coupons_back(error=str(exc))
+    return _coupons_back(saved="updated")
+
+
+@router.post("/coupons/{coupon_id}/deactivate")
+async def coupon_deactivate(
+    coupon_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_coupons")
+    if deny:
+        return deny
+    await coupon_service.deactivate_coupon(session, coupon_id, admin_id=admin.id)
+    await session.commit()
+    return _coupons_back(saved="deactivated")
+
+
+@router.get("/coupons/{coupon_id}/usages", response_class=HTMLResponse)
+async def coupon_usages_page(
+    request: Request,
+    coupon_id: int,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_coupons")
+    if deny:
+        return deny
+    coupon = await coupon_service.get_coupon(session, coupon_id)
+    if coupon is None:
+        return RedirectResponse("/admin/coupons", status_code=302)
+    usages = await coupon_service.list_coupon_usages(session, coupon_id)
+    return templates.TemplateResponse(
+        "coupon_usages.html",
+        _ctx(request, admin, coupon=coupon, usages=usages),
+    )
+
+
+# ==========================================================================
+# Marketing: referrals + rewards (Phase 10). All need `manage_referrals`.
+# ==========================================================================
+@router.get("/referrals", response_class=HTMLResponse)
+async def referrals_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_referrals")
+    if deny:
+        return deny
+    from sqlalchemy import select
+    from app.models.user import User
+    rows = (await session.execute(
+        select(User).where(User.referrer_id.is_not(None))
+        .order_by(User.referral_registered_at.desc().nulls_last(), User.id.desc()).limit(300)
+    )).scalars().all()
+    referrers = {u.referrer_id: None for u in rows}
+    for rid in list(referrers):
+        referrers[rid] = await session.get(User, rid)
+    return templates.TemplateResponse(
+        "referrals.html",
+        _ctx(request, admin, referred=rows, referrers=referrers),
+    )
+
+
+def _rewards_back(*, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/referral-rewards?{q}", status_code=303)
+
+
+@router.get("/referral-rewards", response_class=HTMLResponse)
+async def referral_rewards_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    status: str = "",
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_referrals")
+    if deny:
+        return deny
+    rewards = await referral_service.list_rewards(session, status=(status or None), limit=300)
+    return templates.TemplateResponse(
+        "referral_rewards.html",
+        _ctx(request, admin, rewards=rewards, status=status, saved=saved, error=error),
+    )
+
+
+@router.post("/referral-rewards/{reward_id}/approve")
+async def referral_reward_approve(
+    reward_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_referrals")
+    if deny:
+        return deny
+    try:
+        await referral_service.approve_reward(session, reward_id, admin.id)
+    except referral_service.ReferralError as exc:
+        return _rewards_back(error=str(exc))
+    return _rewards_back(saved="approved")
+
+
+@router.post("/referral-rewards/{reward_id}/pay")
+async def referral_reward_pay(
+    reward_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_referrals")
+    if deny:
+        return deny
+    try:
+        await referral_service.pay_reward_to_wallet(session, reward_id, admin_id=admin.id)
+    except referral_service.ReferralError as exc:
+        return _rewards_back(error=str(exc))
+    return _rewards_back(saved="paid")
+
+
+@router.post("/referral-rewards/{reward_id}/reject")
+async def referral_reward_reject(
+    reward_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_referrals")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip() or "rejected by admin"
+    try:
+        await referral_service.reject_reward(session, reward_id, admin.id, reason)
+        await session.commit()
+    except referral_service.ReferralError as exc:
+        return _rewards_back(error=str(exc))
+    return _rewards_back(saved="rejected")

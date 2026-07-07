@@ -56,6 +56,13 @@ class Order(Base, TimestampMixin):
     discount_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     final_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
+    # Applied coupon (Phase 10). Both null until a coupon is applied to a still
+    # pending_payment order; frozen once payment is submitted/approved.
+    coupon_id: Mapped[int | None] = mapped_column(
+        ForeignKey("coupons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    coupon_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending_payment", index=True
     )

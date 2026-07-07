@@ -53,9 +53,18 @@ class User(Base, TimestampMixin):
         String(5), default="fa", server_default="fa", nullable=False
     )
 
-    # Self-referential: the user who invited this one (referral system, later phase).
+    # Self-referential: the user who invited this one. Set once, on the first
+    # /start carrying a valid referral code (Phase 10); never overwritten.
     referrer_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", name="fk_users_referrer_id_users"), nullable=True
+    )
+    # This user's own shareable referral code (Phase 10), and when a referrer was
+    # first attached to them.
+    referral_code: Mapped[str | None] = mapped_column(
+        String(32), unique=True, index=True, nullable=True
+    )
+    referral_registered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     last_activity_at: Mapped[datetime | None] = mapped_column(
