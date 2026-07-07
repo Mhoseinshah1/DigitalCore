@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.product import PRODUCT_TYPES, Product
+from app.models.product import PRODUCT_ACTION_TYPES, PRODUCT_TYPES, Product
 from app.models.xui_inbound import XuiInbound
 from app.models.xui_server import XuiServer
 from app.schemas.product import ProductCreate, ProductUpdate
@@ -32,6 +32,8 @@ _EDITABLE_FIELDS = (
     "is_active",
     "is_hidden",
     "sort_order",
+    "action_type",
+    "applies_to_service",
 )
 
 
@@ -43,11 +45,19 @@ def validate_product(
     traffic_gb: int | None,
     xui_server_id: int | None = None,
     xui_inbound_id: int | None = None,
+    *,
+    action_type: str | None = None,
+    applies_to_service: bool = False,
 ) -> None:
     """Raise ValueError when the field combination is not a valid product.
 
     (Field-level checks only; the XUI server/inbound records are verified against
     the database by `validate_xui_binding`.)
+
+    A service-action product (``applies_to_service``, Phase 8) is a v2ray product
+    that modifies an EXISTING service, so it needs no server/inbound binding: a
+    ``renew_service`` product needs a duration, an ``add_traffic`` product needs
+    traffic, and that is all.
     """
     if type_ not in PRODUCT_TYPES:
         raise ValueError(f"type must be one of {PRODUCT_TYPES}, got {type_!r}")
@@ -55,6 +65,24 @@ def validate_product(
         raise ValueError("title must not be empty")
     if price is None or int(price) < 0:
         raise ValueError("price must be >= 0")
+
+    if applies_to_service or action_type:
+        if type_ != "v2ray":
+            raise ValueError("only v2ray products can be service actions")
+        if not applies_to_service or not action_type:
+            raise ValueError(
+                "a service-action product needs both applies_to_service and an action_type")
+        if action_type not in PRODUCT_ACTION_TYPES or action_type == "new_service":
+            raise ValueError("action_type must be renew_service or add_traffic")
+        if action_type == "renew_service" and (not duration_days or int(duration_days) <= 0):
+            raise ValueError("a renewal product requires duration_days > 0")
+        if action_type == "add_traffic" and (not traffic_gb or int(traffic_gb) <= 0):
+            raise ValueError("an add-traffic product requires traffic_gb > 0")
+        # Service actions never bind a server/inbound (they reuse the service's).
+        if xui_server_id is not None or xui_inbound_id is not None:
+            raise ValueError("service-action products must not set an XUI server/inbound")
+        return
+
     if type_ == "license":
         if xui_server_id is not None or xui_inbound_id is not None:
             raise ValueError("license products must not set an XUI server/inbound")
@@ -145,10 +173,15 @@ async def create(
     validate_product(
         data.type, data.title, data.price, data.duration_days, data.traffic_gb,
         data.xui_server_id, data.xui_inbound_id,
+        action_type=data.action_type, applies_to_service=data.applies_to_service,
     )
-    await validate_xui_binding(
-        session, data.type, data.xui_server_id, data.xui_inbound_id, is_active=data.is_active
-    )
+    # Service-action products reuse the target service's binding, so they have
+    # none of their own — skip the server/inbound DB verification for them.
+    if not data.applies_to_service:
+        await validate_xui_binding(
+            session, data.type, data.xui_server_id, data.xui_inbound_id,
+            is_active=data.is_active,
+        )
     product = Product(
         type=data.type,
         title=data.title.strip(),
@@ -164,6 +197,8 @@ async def create(
         is_active=data.is_active,
         is_hidden=data.is_hidden,
         sort_order=data.sort_order,
+        action_type=data.action_type,
+        applies_to_service=data.applies_to_service,
     )
     session.add(product)
     await session.flush()
@@ -217,6 +252,8 @@ async def update(
         "xui_server_id": product.xui_server_id,
         "xui_inbound_id": product.xui_inbound_id,
         "is_active": product.is_active,
+        "action_type": product.action_type,
+        "applies_to_service": product.applies_to_service,
     }
     merged.update({k: v for k, v in changes.items() if k in merged})
     validate_product(
@@ -227,11 +264,14 @@ async def update(
         merged["traffic_gb"],
         merged["xui_server_id"],
         merged["xui_inbound_id"],
+        action_type=merged["action_type"],
+        applies_to_service=bool(merged["applies_to_service"]),
     )
-    await validate_xui_binding(
-        session, merged["type"], merged["xui_server_id"], merged["xui_inbound_id"],
-        is_active=bool(merged["is_active"]),
-    )
+    if not merged["applies_to_service"]:
+        await validate_xui_binding(
+            session, merged["type"], merged["xui_server_id"], merged["xui_inbound_id"],
+            is_active=bool(merged["is_active"]),
+        )
 
     old_parts: list[str] = []
     new_parts: list[str] = []

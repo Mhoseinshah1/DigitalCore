@@ -31,7 +31,7 @@
         {% for p in products %}
         <tr>
           <td>{{ p.title }}</td>
-          <td>{{ _("product.type." ~ p.type) }}</td>
+          <td>{{ _("product.type." ~ p.type) }}{% if p.applies_to_service and p.action_type %} <span class="pill">{{ _("web.products.form.action." ~ p.action_type) }}</span>{% endif %}</td>
           <td>{{ _("product.price_fmt", price="{:,}".format(p.price)) }}</td>
           <td class="muted">
             {% if p.type == "v2ray" %}

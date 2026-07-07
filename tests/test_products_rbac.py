@@ -152,3 +152,37 @@ async def test_owner_create_v2ray_requires_specs(client_with_role) -> None:
     }
     r = await client.post("/admin/products/create", data=good, follow_redirects=False)
     assert r.status_code == 303 and "saved=1" in r.headers["location"]
+
+
+async def test_owner_creates_service_action_products(client_with_role) -> None:
+    """Phase 8: a renew / add-traffic product is creatable via the form, needs no
+    binding, and shows its action pill in the list."""
+    client = await client_with_role("owner")
+    # A renewal product: v2ray + service action + a duration, no server/inbound.
+    renew = {
+        "type": "v2ray", "title": "Renew 30d", "price": "40000",
+        "duration_days": "30", "applies_to_service": "on",
+        "action_type": "renew_service", "is_active": "on",
+    }
+    r = await client.post("/admin/products/create", data=renew, follow_redirects=False)
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
+
+    # An add-traffic product with only traffic set.
+    add = {
+        "type": "v2ray", "title": "Add 20GB", "price": "20000",
+        "traffic_gb": "20", "applies_to_service": "on",
+        "action_type": "add_traffic", "is_active": "on",
+    }
+    r = await client.post("/admin/products/create", data=add, follow_redirects=False)
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
+
+    r = await client.get("/admin/products")
+    assert "Renew 30d" in r.text and "Add 20GB" in r.text
+
+    # A renewal product WITHOUT a duration is rejected by the form handler.
+    bad = {
+        "type": "v2ray", "title": "Renew no dur", "price": "1000",
+        "applies_to_service": "on", "action_type": "renew_service", "is_active": "on",
+    }
+    r = await client.post("/admin/products/create", data=bad, follow_redirects=False)
+    assert r.status_code == 303 and "error=" in r.headers["location"]

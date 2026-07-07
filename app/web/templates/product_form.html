@@ -63,6 +63,29 @@
   <section class="panel" id="v2ray-fields">
     <h2 class="panel-title">{{ _("web.products.form.v2ray_section") }}</h2>
     <p class="muted">{{ _("web.products.form.v2ray_bind_hint") }}</p>
+
+    <!-- Service action (renew / add-traffic): modifies an existing service, no binding. -->
+    <div class="field field-bool">
+      <label class="switch">
+        <input type="checkbox" id="applies_to_service" name="applies_to_service"
+               {% if product and product.applies_to_service %}checked{% endif %}>
+        <span class="switch-track"></span>
+        <span class="switch-label">{{ _("web.products.form.applies_to_service") }}</span>
+      </label>
+      <small class="muted">{{ _("web.products.form.action_hint") }}</small>
+    </div>
+    <div class="field" id="action-type-field">
+      <label for="action_type">{{ _("web.products.form.action_type") }}</label>
+      <select id="action_type" name="action_type">
+        <option value="renew_service" {% if product and product.action_type == "renew_service" %}selected{% endif %}>
+          {{ _("web.products.form.action.renew_service") }}
+        </option>
+        <option value="add_traffic" {% if product and product.action_type == "add_traffic" %}selected{% endif %}>
+          {{ _("web.products.form.action.add_traffic") }}
+        </option>
+      </select>
+    </div>
+
     <div class="fields">
       <div class="field">
         <label for="duration_days">{{ _("web.products.form.duration") }}</label>
@@ -74,11 +97,14 @@
         <input id="traffic_gb" name="traffic_gb" type="number" min="0"
                value="{{ product.traffic_gb if product and product.traffic_gb is not none else '' }}">
       </div>
-      <div class="field">
+      <div class="field" id="ip-limit-field">
         <label for="ip_limit">{{ _("web.products.form.ip_limit") }}</label>
         <input id="ip_limit" name="ip_limit" type="number" min="0"
                value="{{ product.ip_limit if product and product.ip_limit is not none else '' }}">
       </div>
+    </div>
+    <!-- Server/inbound binding: only for a NEW-service v2ray product. -->
+    <div class="fields" id="binding-fields">
       <div class="field">
         <label for="xui_server_id">{{ _("web.products.form.xui_server") }}</label>
         <select id="xui_server_id" name="xui_server_id"
@@ -123,11 +149,26 @@
     var v2rayBox = document.getElementById('v2ray-fields');
     var serverSel = document.getElementById('xui_server_id');
     var inboundSel = document.getElementById('xui_inbound_id');
+    var appliesChk = document.getElementById('applies_to_service');
+    var actionField = document.getElementById('action-type-field');
+    var bindingBox = document.getElementById('binding-fields');
+    var ipLimitField = document.getElementById('ip-limit-field');
     var pickInbound = {{ _("web.products.form.pick_inbound")|tojson }};
+
+    function toggleAction() {
+      // A service-action product carries no binding / ip-limit; a new-service
+      // product hides the action selector.
+      var isAction = appliesChk && appliesChk.checked;
+      if (actionField) { actionField.style.display = isAction ? '' : 'none'; }
+      if (bindingBox) { bindingBox.style.display = isAction ? 'none' : ''; }
+      if (ipLimitField) { ipLimitField.style.display = isAction ? 'none' : ''; }
+    }
 
     function toggleType() {
       var isV2 = typeSel.value === 'v2ray';
       v2rayBox.style.display = isV2 ? '' : 'none';
+      if (!isV2 && appliesChk) { appliesChk.checked = false; }
+      toggleAction();
     }
 
     function loadInbounds(preselect) {
@@ -158,6 +199,7 @@
         .catch(function () { /* leave placeholder only */ });
     }
 
+    if (appliesChk) { appliesChk.addEventListener('change', toggleAction); }
     if (typeSel) { typeSel.addEventListener('change', toggleType); toggleType(); }
     if (serverSel) {
       // On manual server change, refetch the active inbound list (no preselect).

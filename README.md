@@ -139,7 +139,11 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
 **Service actions** (`app/services/v2ray_lifecycle_service.py`). A renew /
 add-traffic **product** is a v2ray product with `applies_to_service = true` and an
 `action_type` (`renew_service` / `add_traffic`); such products are hidden from the
-normal catalog and only reachable from a specific service. Buying one creates an
+normal catalog and only reachable from a specific service. An admin creates one on
+the **product form** (`/admin/products/create`) by ticking *“Service-action
+product”* and choosing renew or add-traffic — the form drops the server/inbound
+binding (a service action reuses the target service's binding) and validates that a
+renewal has a duration and an add-traffic product has traffic. Buying one creates an
 order carrying `action_type` + `target_service_id` (validated: the target must be
 the buyer's own, non-deleted service, and the product must match the action).
 `renew_service` extends the expiry and re-enables the panel client
@@ -728,10 +732,11 @@ rows (idempotent; never overwrites custom values).
 
 ## Phase 8 manual test checklist
 
-1. Create a v2ray product and a **renewal** product (`applies_to_service`,
-   `action_type = renew_service`, a duration) + an **add-traffic** product
-   (`action_type = add_traffic`, a traffic amount). Confirm neither appears in the
-   normal catalog.
+1. On the product form create a normal v2ray product, then a **renewal** product
+   (tick *Service-action product* → **Renew** + a duration) and an **add-traffic**
+   product (tick *Service-action product* → **Add traffic** + a traffic amount);
+   note the binding fields disappear for those. Confirm the two action products
+   show their pill in the list and do **not** appear in the bot's buy catalog.
 2. Buy the base product and let it provision; open `/my_services` → the service.
    Confirm it shows live status, remaining traffic, and days left.
 3. Tap **Renew**, pick the plan, pay (card or wallet); confirm the expiry moves

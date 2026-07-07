@@ -117,6 +117,74 @@ async def test_v2ray_requires_duration_and_traffic(db_session, overrides) -> Non
         await product_service.create(db_session, _v2ray(**overrides))
 
 
+# --- Phase 8: service-action products (renew / add-traffic) -----------------
+def _renew(**overrides) -> ProductCreate:
+    payload = {"type": "v2ray", "title": "Renew 30d", "price": 40_000,
+               "duration_days": 30, "applies_to_service": True,
+               "action_type": "renew_service"}
+    payload.update(overrides)
+    return ProductCreate(**payload)
+
+
+def _add_traffic(**overrides) -> ProductCreate:
+    payload = {"type": "v2ray", "title": "+20GB", "price": 20_000,
+               "traffic_gb": 20, "applies_to_service": True,
+               "action_type": "add_traffic"}
+    payload.update(overrides)
+    return ProductCreate(**payload)
+
+
+async def test_create_renew_and_add_traffic_products(db_session) -> None:
+    # Renew: needs a duration, no binding.
+    renew = await product_service.create(db_session, _renew())
+    add = await product_service.create(db_session, _add_traffic())
+    await db_session.commit()
+    assert renew.applies_to_service and renew.action_type == "renew_service"
+    assert renew.xui_server_id is None and renew.xui_inbound_id is None
+    assert add.applies_to_service and add.action_type == "add_traffic"
+    # Excluded from the buy catalog, listed by the action query.
+    assert renew.id not in {p.id for p in await product_service.list_for_user(db_session)}
+    plans = await product_service.list_service_action_products(db_session, "renew_service")
+    assert [p.id for p in plans] == [renew.id]
+
+
+async def test_renew_requires_duration_add_traffic_requires_traffic(db_session) -> None:
+    with pytest.raises(ValueError):
+        await product_service.create(db_session, _renew(duration_days=0))
+    with pytest.raises(ValueError):
+        await product_service.create(db_session, _add_traffic(traffic_gb=None))
+
+
+async def test_action_product_rejects_license_and_binding(db_session) -> None:
+    # Only v2ray products can be service actions.
+    with pytest.raises(ValueError):
+        await product_service.create(db_session, _renew(type="license"))
+    # A service action must not carry an XUI binding.
+    sid, iid = await _seed_binding(db_session)
+    with pytest.raises(ValueError):
+        await product_service.create(
+            db_session, _renew(xui_server_id=sid, xui_inbound_id=iid))
+    # applies_to_service without an action_type is incomplete.
+    with pytest.raises(ValueError):
+        await product_service.create(
+            db_session, ProductCreate(type="v2ray", title="x", price=1,
+                                      duration_days=30, applies_to_service=True))
+
+
+async def test_update_can_flip_product_to_service_action(db_session) -> None:
+    sid, iid = await _seed_binding(db_session)
+    product = await product_service.create(
+        db_session, _v2ray(xui_server_id=sid, xui_inbound_id=iid))
+    await db_session.commit()
+    # Converting to a renewal action must drop the binding in the same update.
+    updated = await product_service.update(
+        db_session, product.id,
+        ProductUpdate(applies_to_service=True, action_type="renew_service",
+                      xui_server_id=None, xui_inbound_id=None))
+    await db_session.commit()
+    assert updated.applies_to_service and updated.action_type == "renew_service"
+
+
 async def test_invalid_type_and_empty_title_rejected(db_session) -> None:
     with pytest.raises(ValueError):
         await product_service.create(db_session, _license(type="ebook"))

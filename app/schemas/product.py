@@ -21,6 +21,11 @@ class ProductCreate(BaseModel):
     is_active: bool = True
     is_hidden: bool = False
     sort_order: int = 0
+    # Service-action products (Phase 8): renew / add-traffic on an existing
+    # service. `action_type` is one of renew_service / add_traffic when
+    # applies_to_service is set.
+    action_type: str | None = None
+    applies_to_service: bool = False
 
 
 class ProductUpdate(BaseModel):
@@ -40,6 +45,8 @@ class ProductUpdate(BaseModel):
     is_active: bool | None = None
     is_hidden: bool | None = None
     sort_order: int | None = None
+    action_type: str | None = None
+    applies_to_service: bool | None = None
 
 
 class ProductRead(BaseModel):
@@ -61,4 +68,6 @@ class ProductRead(BaseModel):
     is_hidden: bool
     stock_count: int
     sort_order: int
+    action_type: str | None
+    applies_to_service: bool
     created_at: datetime

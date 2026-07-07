@@ -793,7 +793,13 @@ def _product_form_values(form: dict[str, object]) -> dict[str, object]:
     type_ = str(form.get("type", "")).strip()
     xui_server_id = _parse_int_opt(form.get("xui_server_id"))
     xui_inbound_id = _parse_int_opt(form.get("xui_inbound_id"))
-    if type_ != "v2ray":
+    # A service-action product (renew / add-traffic, Phase 8) modifies an existing
+    # service and carries no binding of its own. Only v2ray products can be one.
+    applies_to_service = ("applies_to_service" in form) and type_ == "v2ray"
+    action_type = str(form.get("action_type", "")).strip() or None
+    if not applies_to_service:
+        action_type = None
+    if type_ != "v2ray" or applies_to_service:
         xui_server_id = None
         xui_inbound_id = None
     return {
@@ -809,6 +815,8 @@ def _product_form_values(form: dict[str, object]) -> dict[str, object]:
         "is_active": "is_active" in form,
         "is_hidden": "is_hidden" in form,
         "sort_order": _parse_int_opt(form.get("sort_order")) or 0,
+        "action_type": action_type,
+        "applies_to_service": applies_to_service,
     }
 
 
