@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{% if tutorial %}{{ _("web.tutorials.edit_title") }}{% else %}{{ _("web.tutorials.create_title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if tutorial %}{{ _("web.tutorials.edit_title") }}{% else %}{{ _("web.tutorials.create_title") }}{% endif %}</h1>
+  <p class="muted"><a href="/admin/tutorials">{{ _("web.tutorials.back") }}</a> · {{ _("web.tutorials.content_hint") }}</p>
+</header>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form method="post"
+      action="{% if tutorial %}/admin/tutorials/{{ tutorial.id }}/edit{% else %}/admin/tutorials/create{% endif %}"
+      class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="title">{{ _("web.tutorials.form.title") }}</label>
+        <input id="title" name="title" type="text" required value="{{ tutorial.title if tutorial else '' }}">
+      </div>
+      <div class="field">
+        <label for="category_id">{{ _("web.tutorials.form.category") }}</label>
+        <select id="category_id" name="category_id">
+          <option value="0">{{ _("web.tutorials.form.no_category") }}</option>
+          {% for c in categories %}
+          <option value="{{ c.id }}" {% if tutorial and tutorial.category_id == c.id %}selected{% endif %}>{{ c.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="platform">{{ _("web.tutorials.form.platform") }}</label>
+        <select id="platform" name="platform">
+          <option value="">{{ _("web.tutorials.form.any") }}</option>
+          {% for p in platforms %}
+          <option value="{{ p }}" {% if tutorial and tutorial.platform == p %}selected{% endif %}>{{ _("tutorial.platform." ~ p) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="product_type">{{ _("web.tutorials.form.product") }}</label>
+        <select id="product_type" name="product_type">
+          <option value="">{{ _("web.tutorials.form.any") }}</option>
+          {% for pt in product_types %}
+          <option value="{{ pt }}" {% if tutorial and tutorial.product_type == pt %}selected{% endif %}>{{ _("tutorial.product." ~ pt) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sort_order">{{ _("web.tutorials.form.sort_order") }}</label>
+        <input id="sort_order" name="sort_order" type="number" value="{{ tutorial.sort_order if tutorial else 0 }}">
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="is_active" {% if not tutorial or tutorial.is_active %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.tutorials.form.is_active") }}</span>
+        </label>
+      </div>
+      <div class="field field-text">
+        <label for="content">{{ _("web.tutorials.form.content") }}</label>
+        <textarea id="content" name="content" rows="12">{{ tutorial.content if tutorial else '' }}</textarea>
+      </div>
+    </div>
+  </section>
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.tutorials.form.save") }}</button>
+    <a class="btn" href="/admin/tutorials">{{ _("web.tutorials.form.cancel") }}</a>
+  </div>
+</form>
+{% endblock %}

@@ -46,6 +46,8 @@ from app.services import (
     order_service,
     payment_service,
     product_service,
+    ticket_service,
+    tutorial_service,
     user_service,
     v2ray_lifecycle_service,
     v2ray_service,
@@ -150,6 +152,26 @@ NAV_TREE: list[dict] = [
          "href": "/admin/wallet/transactions", "permission": "view_wallet_topups"},
     ]},
 
+    {"label_key": "nav.support", "icon": "🎫", "children": [
+        {"label_key": "nav.support.tickets", "icon": "🎫", "href": "/admin/tickets",
+         "permission": "view_tickets"},
+        {"label_key": "nav.support.open", "icon": "📨",
+         "href": "/admin/tickets?status=open", "permission": "view_tickets"},
+        {"label_key": "nav.support.closed", "icon": "✅",
+         "href": "/admin/tickets?status=closed", "permission": "view_tickets"},
+        {"label_key": "nav.support.mine", "icon": "🙋",
+         "href": "/admin/tickets?assigned=me", "permission": "view_tickets"},
+    ]},
+
+    {"label_key": "nav.tutorials", "icon": "📚", "children": [
+        {"label_key": "nav.tutorials.all", "icon": "📚", "href": "/admin/tutorials",
+         "permission": "manage_tutorials"},
+        {"label_key": "nav.tutorials.create", "icon": "➕", "href": "/admin/tutorials/create",
+         "permission": "manage_tutorials"},
+        {"label_key": "nav.tutorials.categories", "icon": "🗂",
+         "href": "/admin/tutorial-categories", "permission": "manage_tutorials"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -185,8 +207,6 @@ NAV_TREE: list[dict] = [
     {"label_key": "nav.future", "icon": "🧭", "children": [
         {"label_key": "nav.future.services", "icon": "🌐", "href": "/admin/services",
          "permission": "manage_products", "placeholder": True},
-        {"label_key": "nav.future.tickets", "icon": "🎫", "href": "/admin/tickets",
-         "permission": "view_dashboard", "placeholder": True},
         {"label_key": "nav.future.coupons", "icon": "🏷", "href": "/admin/coupons",
          "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.referrals", "icon": "🔗", "href": "/admin/referrals",
@@ -207,7 +227,6 @@ PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
     ("/payments/wallet", "nav.payments.wallet", "view_payments"),
     ("/payments/receipts", "nav.payments.receipts", "view_payments"),
     ("/services", "nav.future.services", "manage_products"),
-    ("/tickets", "nav.future.tickets", "view_dashboard"),
     ("/coupons", "nav.future.coupons", "manage_products"),
     ("/referrals", "nav.future.referrals", "view_dashboard"),
     ("/backups", "nav.future.backups", "manage_settings"),
@@ -2390,3 +2409,409 @@ async def order_refund(
     except wallet_service.WalletError as exc:
         return _order_back(order_id, error=str(exc))
     return _order_back(order_id, saved="refunded")
+
+
+# ==========================================================================
+# Support tickets (Phase 9)
+#
+# List/detail need `view_tickets`; reply/close/assign/priority need
+# `manage_tickets`. Attachments are served to authenticated `view_tickets`
+# admins only, path-traversal guarded.
+# ==========================================================================
+_TICKET_STATUS_CLASS = {
+    "open": "", "pending_admin": "warn", "pending_user": "", "closed": "ok",
+}
+
+
+def _ticket_back(ticket_id: int, *, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/tickets/{ticket_id}?{q}", status_code=303)
+
+
+async def _read_upload(form: dict, field: str) -> "ticket_service.TicketAttachment | None":
+    """Turn an uploaded form file into a TicketAttachment, or None if absent."""
+    up = form.get(field)
+    if up is None or not getattr(up, "filename", ""):
+        return None
+    content = await up.read()
+    if not content:
+        return None
+    return ticket_service.TicketAttachment(
+        content=content, original_name=up.filename,
+        mime_type=getattr(up, "content_type", None), file_id=None,
+    )
+
+
+@router.get("/tickets", response_class=HTMLResponse)
+async def tickets_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    status: str = "",
+    assigned: str = "",
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_tickets")
+    if deny:
+        return deny
+    assigned_admin_id = admin.id if assigned == "me" else None
+    tickets = await ticket_service.list_admin_tickets(
+        session, status=(status or None), assigned_admin_id=assigned_admin_id, limit=200,
+    )
+    counts = await ticket_service.count_by_status(session)
+    return templates.TemplateResponse(
+        "tickets.html",
+        _ctx(request, admin, tickets=tickets, counts=counts, status=status,
+             assigned=assigned, status_class=_TICKET_STATUS_CLASS,
+             can_manage=has_permission(admin.role, "manage_tickets"),
+             saved=saved, error=error),
+    )
+
+
+@router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
+async def ticket_detail_page(
+    ticket_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_tickets")
+    if deny:
+        return deny
+    ticket = await ticket_service.get_ticket(session, ticket_id)
+    if ticket is None:
+        return RedirectResponse("/admin/tickets", status_code=302)
+    from app.models.ticket import TICKET_PRIORITIES
+    return templates.TemplateResponse(
+        "ticket_detail.html",
+        _ctx(request, admin, ticket=ticket, messages=ticket.messages,
+             priorities=TICKET_PRIORITIES, status_class=_TICKET_STATUS_CLASS,
+             attachments_enabled=await ticket_service.attachments_enabled(session),
+             can_manage=has_permission(admin.role, "manage_tickets"),
+             saved=saved, error=error),
+    )
+
+
+@router.post("/tickets/{ticket_id}/reply")
+async def ticket_reply(
+    ticket_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tickets")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    message = str(form.get("message", "")).strip()
+    try:
+        attachment = await _read_upload(form, "attachment")
+        ticket = await ticket_service.add_admin_reply(
+            session, ticket_id, admin.id, message, attachment=attachment)
+        await session.commit()
+    except ticket_service.TicketError as exc:
+        return _ticket_back(ticket_id, error=str(exc))
+    # Best-effort: tell the user a staff reply landed.
+    await ticket_service.notify_user(
+        None, ticket.user, "ticket.notify.admin_reply", number=ticket.ticket_number)
+    return _ticket_back(ticket_id, saved="replied")
+
+
+@router.post("/tickets/{ticket_id}/close")
+async def ticket_close(
+    ticket_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tickets")
+    if deny:
+        return deny
+    try:
+        await ticket_service.close_ticket(
+            session, ticket_id, actor_id=admin.id, actor_type="admin")
+        await session.commit()
+    except ticket_service.TicketError as exc:
+        return _ticket_back(ticket_id, error=str(exc))
+    return _ticket_back(ticket_id, saved="closed")
+
+
+@router.post("/tickets/{ticket_id}/assign")
+async def ticket_assign(
+    ticket_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tickets")
+    if deny:
+        return deny
+    try:
+        await ticket_service.assign_ticket(session, ticket_id, admin.id)
+        await session.commit()
+    except ticket_service.TicketError as exc:
+        return _ticket_back(ticket_id, error=str(exc))
+    return _ticket_back(ticket_id, saved="assigned")
+
+
+@router.post("/tickets/{ticket_id}/priority")
+async def ticket_priority(
+    ticket_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tickets")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    priority = str(form.get("priority", "")).strip()
+    try:
+        await ticket_service.set_priority(session, ticket_id, priority, admin_id=admin.id)
+        await session.commit()
+    except ticket_service.TicketError as exc:
+        return _ticket_back(ticket_id, error=str(exc))
+    return _ticket_back(ticket_id, saved="priority")
+
+
+@router.get("/tickets/attachments/{message_id}")
+async def ticket_attachment_file(
+    message_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a ticket attachment to authenticated admins only, guarding traversal."""
+    lang, deny = _guard(request, admin, "view_tickets")
+    if deny:
+        return deny
+    from app.models.ticket_message import TicketMessage
+    msg = await session.get(TicketMessage, message_id)
+    if msg is None or not msg.attachment_path:
+        return HTMLResponse(t("web.tickets.attach_not_found", lang), status_code=404)
+    resolved = ticket_service.resolve_attachment_path(msg.attachment_path)
+    if resolved is None:
+        return HTMLResponse(t("web.tickets.attach_not_found", lang), status_code=404)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id,
+        action="admin_viewed_ticket_attachment", target_type="ticket_message",
+        target_id=msg.id,
+    )
+    return FileResponse(
+        resolved,
+        media_type=msg.attachment_mime_type or "application/octet-stream",
+        filename=msg.attachment_original_name or resolved.name,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
+
+
+# ==========================================================================
+# Tutorials / knowledge base (Phase 9). All routes need `manage_tutorials`.
+# ==========================================================================
+def _tutorials_back(*, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/tutorials?{q}", status_code=303)
+
+
+def _tutorial_form_values(form: dict) -> dict:
+    return {
+        "title": str(form.get("title", "")).strip(),
+        "content": str(form.get("content", "")),
+        "category_id": _parse_int_opt(form.get("category_id")),
+        "platform": (str(form.get("platform", "")).strip() or None),
+        "product_type": (str(form.get("product_type", "")).strip() or None),
+        "sort_order": _parse_int_opt(form.get("sort_order")) or 0,
+        "is_active": "is_active" in form,
+    }
+
+
+@router.get("/tutorials", response_class=HTMLResponse)
+async def tutorials_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    tutorials = await tutorial_service.list_tutorials(session)
+    return templates.TemplateResponse(
+        "tutorials.html",
+        _ctx(request, admin, tutorials=tutorials, saved=saved, error=error),
+    )
+
+
+async def _tutorial_form_ctx(session: AsyncSession) -> dict:
+    from app.models.tutorial import TUTORIAL_PLATFORMS, TUTORIAL_PRODUCT_TYPES
+    return {
+        "categories": await tutorial_service.list_categories(session),
+        "platforms": TUTORIAL_PLATFORMS,
+        "product_types": TUTORIAL_PRODUCT_TYPES,
+    }
+
+
+@router.get("/tutorials/create", response_class=HTMLResponse)
+async def tutorial_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    return templates.TemplateResponse(
+        "tutorial_form.html",
+        _ctx(request, admin, tutorial=None, error="", **await _tutorial_form_ctx(session)),
+    )
+
+
+@router.post("/tutorials/create")
+async def tutorial_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        await tutorial_service.create_tutorial(
+            session, actor_id=admin.id, **_tutorial_form_values(form))
+        await session.commit()
+    except tutorial_service.TutorialError as exc:
+        return _tutorials_back(error=str(exc))
+    return _tutorials_back(saved="created")
+
+
+@router.get("/tutorials/{tutorial_id}/edit", response_class=HTMLResponse)
+async def tutorial_edit_page(
+    tutorial_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    tutorial = await tutorial_service.get_tutorial(session, tutorial_id)
+    if tutorial is None:
+        return RedirectResponse("/admin/tutorials", status_code=302)
+    return templates.TemplateResponse(
+        "tutorial_form.html",
+        _ctx(request, admin, tutorial=tutorial, error="", **await _tutorial_form_ctx(session)),
+    )
+
+
+@router.post("/tutorials/{tutorial_id}/edit")
+async def tutorial_edit_submit(
+    tutorial_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    values = _tutorial_form_values(form)
+    # category_id 0/None from the form means "no category".
+    values["category_id"] = values["category_id"] or 0
+    try:
+        updated = await tutorial_service.update_tutorial(
+            session, tutorial_id, actor_id=admin.id, **values)
+        if updated is None:
+            return _tutorials_back(error="not found")
+        await session.commit()
+    except tutorial_service.TutorialError as exc:
+        return _tutorials_back(error=str(exc))
+    return _tutorials_back(saved="updated")
+
+
+@router.post("/tutorials/{tutorial_id}/toggle-active")
+async def tutorial_toggle(
+    tutorial_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    await tutorial_service.toggle_active(session, tutorial_id, actor_id=admin.id)
+    await session.commit()
+    return _tutorials_back(saved="toggled")
+
+
+@router.get("/tutorial-categories", response_class=HTMLResponse)
+async def tutorial_categories_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    categories = await tutorial_service.list_categories(session)
+    return templates.TemplateResponse(
+        "tutorial_categories.html",
+        _ctx(request, admin, categories=categories, saved=saved, error=error),
+    )
+
+
+def _categories_back(*, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/tutorial-categories?{q}", status_code=303)
+
+
+@router.post("/tutorial-categories/create")
+async def tutorial_category_create(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        await tutorial_service.create_category(
+            session, str(form.get("title", "")),
+            sort_order=_parse_int_opt(form.get("sort_order")) or 0,
+            is_active="is_active" in form, actor_id=admin.id)
+        await session.commit()
+    except tutorial_service.TutorialError as exc:
+        return _categories_back(error=str(exc))
+    return _categories_back(saved="created")
+
+
+@router.post("/tutorial-categories/{category_id}/edit")
+async def tutorial_category_edit(
+    category_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_tutorials")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        updated = await tutorial_service.update_category(
+            session, category_id, title=str(form.get("title", "")),
+            sort_order=_parse_int_opt(form.get("sort_order")) or 0,
+            is_active="is_active" in form, actor_id=admin.id)
+        if updated is None:
+            return _categories_back(error="not found")
+        await session.commit()
+    except tutorial_service.TutorialError as exc:
+        return _categories_back(error=str(exc))
+    return _categories_back(saved="updated")

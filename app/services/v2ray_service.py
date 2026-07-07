@@ -617,9 +617,22 @@ async def _notify_user(
             return
         from aiogram import Bot
         own = b = Bot(settings.TELEGRAM_BOT_TOKEN)
+    # A "connection guide" button (Phase 9) below the delivery message, shown only
+    # when tutorials are enabled. It opens the v2ray connection tutorials.
+    markup = None
+    try:
+        from app.core.settings_service import SettingsService
+        if await SettingsService(session).get_bool("tutorials_enabled", True):
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+            from app.i18n import t as _t
+            lang = "fa"
+            markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text=_t("tutorials.connect_button", lang), callback_data="uconn:v2ray")]])
+    except Exception:  # noqa: BLE001 - the button is a bonus, never block delivery
+        markup = None
     ok = False
     try:
-        await b.send_message(target, message, parse_mode="HTML")
+        await b.send_message(target, message, parse_mode="HTML", reply_markup=markup)
         if qr_path:
             try:
                 from aiogram.types import FSInputFile

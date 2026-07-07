@@ -51,6 +51,10 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_wallet_topups",    # see wallet top-up requests + transactions
         "manage_wallet_topups",  # approve / reject wallet top-ups
         "refund_payments",       # refund an order's charge to the wallet
+        # Phase 9 — support tickets + tutorials.
+        "view_tickets",          # see ticket pages (read-only)
+        "manage_tickets",        # reply / close / assign / set priority
+        "manage_tutorials",      # create / edit / toggle tutorials + categories
     }
 )
 
@@ -85,27 +89,32 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_wallet_topups",
             "manage_wallet_topups",
             "refund_payments",
+            "view_tickets",
+            "manage_tickets",
+            "manage_tutorials",
         }
     ),
     # Support: view users, block/restrict them, view license status (no secrets,
     # no import); view v2ray services + refresh usage; view wallet top-ups (no
-    # approve); no settings/wallet-adjust/payments.
+    # approve); front-line support MANAGES tickets (reply/close/assign/priority).
     Role.SUPPORT: frozenset(
         {"view_dashboard", "view_users", "manage_users", "block_users",
-         "restrict_users", "view_licenses", "view_services", "view_wallet_topups"}
+         "restrict_users", "view_licenses", "view_services", "view_wallet_topups",
+         "view_tickets", "manage_tickets"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; approve /
-    # reject wallet top-ups and refund payments; cannot change bot texts or
-    # block/restrict users.
+    # reject wallet top-ups and refund payments; can VIEW tickets but not manage
+    # them; cannot change bot texts or block/restrict users.
     Role.ACCOUNTANT: frozenset(
         {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
          "approve_payments", "process_payments", "view_licenses", "view_services",
-         "view_wallet_topups", "manage_wallet_topups", "refund_payments"}
+         "view_wallet_topups", "manage_wallet_topups", "refund_payments",
+         "view_tickets"}
     ),
-    # Viewer: read-only dashboard + users + license/service/wallet counts (no secrets).
+    # Viewer: read-only dashboard + users + license/service/wallet counts + tickets.
     Role.VIEWER: frozenset(
         {"view_dashboard", "view_users", "view_licenses", "view_services",
-         "view_wallet_topups"}
+         "view_wallet_topups", "view_tickets"}
     ),
 }
 
@@ -236,3 +245,16 @@ def can_manage_wallet_topups(role: object) -> bool:
 
 def can_refund_payments(role: object) -> bool:
     return has_permission(role, "refund_payments")
+
+
+def can_view_tickets(role: object) -> bool:
+    return has_permission(role, "view_tickets")
+
+
+def can_manage_tickets(role: object) -> bool:
+    """Reply / close / assign / set priority on tickets."""
+    return has_permission(role, "manage_tickets")
+
+
+def can_manage_tutorials(role: object) -> bool:
+    return has_permission(role, "manage_tutorials")

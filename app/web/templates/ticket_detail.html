@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.tickets.detail_title", number=ticket.ticket_number) }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.tickets.detail_title", number=ticket.ticket_number) }}</h1>
+  <p class="muted"><a href="/admin/tickets">{{ _("web.tickets.back") }}</a></p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.tickets.flash." ~ saved) if saved in ("replied","closed","assigned","priority") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel">
+  <dl class="kv">
+    <dt>{{ _("web.tickets.col.subject") }}</dt><dd>{{ ticket.subject }}</dd>
+    <dt>{{ _("web.tickets.col.user") }}</dt>
+    <dd>{% if ticket.user %}<a href="/admin/users/{{ ticket.user_id }}">{{ ticket.user.username or ticket.user.telegram_id or ("#" ~ ticket.user_id) }}</a>{% else %}—{% endif %}</dd>
+    <dt>{{ _("web.tickets.col.status") }}</dt><dd><span class="pill {{ status_class.get(ticket.status, '') }}">{{ _("ticket.status." ~ ticket.status) }}</span></dd>
+    <dt>{{ _("web.tickets.col.priority") }}</dt><dd><span class="pill">{{ _("ticket.priority." ~ ticket.priority) }}</span></dd>
+    <dt>{{ _("web.tickets.col.assigned") }}</dt><dd>{% if ticket.assigned_admin %}{{ ticket.assigned_admin.username }}{% else %}<span class="muted">{{ _("web.tickets.unassigned") }}</span>{% endif %}</dd>
+    <dt>{{ _("web.tickets.created") }}</dt><dd class="muted">{{ ticket.created_at.strftime("%Y-%m-%d %H:%M") if ticket.created_at else "—" }}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.tickets.timeline") }}</h2>
+  <div class="ticket-thread">
+    {% for m in messages %}
+    <div class="ticket-msg ticket-msg-{{ m.sender_type }}">
+      <div class="ticket-msg-head muted small">
+        {{ _("ticket.sender." ~ m.sender_type) }}
+        · {{ m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else "" }}
+      </div>
+      {% if m.message %}<div class="ticket-msg-body">{{ m.message | e | replace("\n", "<br>") | safe }}</div>{% endif %}
+      {% if m.attachment_path %}
+      <div class="ticket-msg-attach">
+        📎 <a href="/admin/tickets/attachments/{{ m.id }}" target="_blank" rel="noopener">{{ m.attachment_original_name or _("web.tickets.attachment") }}</a>
+        <span class="muted small">({{ ((m.attachment_size or 0) / 1024) | round(1) }} KB)</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{% if can_manage %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.tickets.reply") }}</h2>
+  <form method="post" action="/admin/tickets/{{ ticket.id }}/reply" enctype="multipart/form-data" class="settings-form">
+    <div class="field field-text">
+      <label for="message">{{ _("web.tickets.reply_message") }}</label>
+      <textarea id="message" name="message" rows="4"></textarea>
+    </div>
+    {% if attachments_enabled %}
+    <div class="field">
+      <label for="attachment">{{ _("web.tickets.attach_file") }}</label>
+      <input id="attachment" name="attachment" type="file">
+    </div>
+    {% endif %}
+    <div class="form-actions">
+      <button type="submit" class="btn primary">{{ _("web.tickets.send_reply") }}</button>
+    </div>
+  </form>
+
+  <div class="action-row" style="margin-top:1rem;">
+    <form method="post" action="/admin/tickets/{{ ticket.id }}/assign">
+      <button type="submit" class="btn">🙋 {{ _("web.tickets.assign_me") }}</button>
+    </form>
+    {% if ticket.status != "closed" %}
+    <form method="post" action="/admin/tickets/{{ ticket.id }}/close">
+      <button type="submit" class="btn">✅ {{ _("web.tickets.close") }}</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/admin/tickets/{{ ticket.id }}/priority" class="inline-form">
+      <select name="priority">
+        {% for p in priorities %}
+        <option value="{{ p }}" {% if ticket.priority == p %}selected{% endif %}>{{ _("ticket.priority." ~ p) }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn">{{ _("web.tickets.set_priority") }}</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

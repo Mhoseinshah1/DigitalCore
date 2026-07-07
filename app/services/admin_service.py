@@ -24,3 +24,22 @@ async def get_role(session: AsyncSession, telegram_id: int) -> Role | None:
 
 async def is_admin(session: AsyncSession, telegram_id: int) -> bool:
     return (await get_role(session, telegram_id)) is not None
+
+
+async def resolve_admin_id(session: AsyncSession, telegram_id: int) -> int | None:
+    """A best-effort ``admins.id`` to attribute a Telegram admin's action to.
+
+    Telegram↔admin linking doesn't exist yet, so a recognised Telegram admin
+    (the bootstrap owner) is attributed to the first super-admin row if one
+    exists. Returns None when the account isn't an admin or no admin row exists
+    (e.g. in tests) — callers treat None as "unattributed".
+    """
+    if await get_role(session, telegram_id) is None:
+        return None
+    from sqlalchemy import select
+
+    from app.models.admin import Admin
+    admin = await session.scalar(
+        select(Admin).where(Admin.is_super_admin.is_(True)).order_by(Admin.id).limit(1)
+    )
+    return admin.id if admin else None

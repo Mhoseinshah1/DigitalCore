@@ -133,6 +133,58 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   remaining-traffic / remaining-days on the service page. **Not** in this phase:
   coupons / referrals / tickets / reseller / reports, online payment gateway,
   Marzban / Hiddify adapters.
+- **Phase 9 — done.** **Support tickets + tutorials / knowledge base.** Users open
+  **support tickets** from `/support` (subject → message → optional photo/file),
+  browse `/tickets`, reply, close, and reopen; staff manage them from
+  `/admin/tickets` (reply with attachment, close, assign-to-self, set priority)
+  and from Telegram (`/admin_tickets`, `/admin_ticket <number>`). Every admin
+  reply pings the user. **Attachments** are validated (safe types, ≤ configurable
+  MB) and stored on disk under `storage/tickets/YYYY/MM/`; the serving route is
+  auth-gated and path-traversal-guarded — bytes never touch the DB or audit log.
+  A **tutorials / knowledge base** lets admins author categories + articles
+  (plain text, HTML-escaped at render) tagged by platform / product type; users
+  read them from `/tutorials`, and a **connection-guide button** appears under a
+  V2Ray delivery. **Not** in this phase: coupons, referrals, reseller, reports,
+  online payment gateway, Marzban / Hiddify adapters, backup changes.
+
+### Phase 9 — support tickets & tutorials
+
+**Tickets** (`app/services/ticket_service.py`, `tickets` + `ticket_messages`
+tables). A ticket is a thread whose status tracks who owes the next move
+(`open → pending_admin ⇄ pending_user → closed`). A user reply flips it to
+`pending_admin`, a staff reply to `pending_user`; either side can close it and —
+when `allow_reopen_closed_tickets` is on — the user can reopen. **Ownership is
+strict**: `add_user_reply` / `reopen_ticket` / user-close verify `user_id`, and
+the bot/web never surface another user's ticket. Attachments reuse the
+payment-receipt discipline (sanitised filename, type + size validation against
+`max_ticket_attachment_mb`, on-disk under the tickets root, traversal-guarded
+serving). Every action is audited (`ticket_created`, `ticket_user_replied`,
+`ticket_admin_replied`, `ticket_closed`, `ticket_reopened`, `ticket_assigned`,
+`ticket_priority_changed`).
+
+**Tutorials** (`app/services/tutorial_service.py`, `tutorial_categories` +
+`tutorials` tables). Categories group articles; each tutorial has a generated,
+de-duplicated slug, optional `platform` (android/ios/windows/mac/linux/general)
+and `product_type` (license/v2ray/general), and an `is_active` flag that hides
+drafts from users while admins see everything. Content is stored verbatim and
+rendered HTML-escaped with `<br>` line breaks — there is no Markdown/HTML
+sanitiser dependency, so untrusted HTML is never injected. Audited:
+`tutorial_created`, `tutorial_updated`, `tutorial_toggled`,
+`tutorial_category_created`, `tutorial_category_updated`.
+
+| Area | Routes / commands |
+|------|-------------------|
+| Bot user | `/support`, `/tickets`, پشتیبانی, تیکت‌های من (create / list / open / reply / close / reopen); `/tutorials`, آموزش‌ها |
+| Bot admin | `/admin_tickets`, `/admin_ticket <number>` → reply · close · assign · priority |
+| Web tickets | `GET /admin/tickets` (+ `?status=`, `?assigned=me`), `GET /admin/tickets/{id}`, `POST …/{reply,close,assign,priority}`, `GET /admin/tickets/attachments/{message_id}` |
+| Web tutorials | `GET/POST /admin/tutorials`, `…/create`, `…/{id}/edit`, `…/{id}/toggle-active`, `GET/POST /admin/tutorial-categories` (+ `…/{id}/edit`) |
+
+**Settings**: `support_enabled`, `ticket_attachments_enabled`,
+`max_ticket_attachment_mb` (10), `allow_reopen_closed_tickets`, `tutorials_enabled`.
+**Permissions**: `view_tickets` (list/detail — owner/admin/support/accountant/viewer),
+`manage_tickets` (reply/close/assign/priority — owner/admin/support),
+`manage_tutorials` (author tutorials — owner/admin). Viewer is read-only;
+accountant can view tickets but not manage them.
 
 ### Phase 8 — renewal, add-traffic & service lifecycle
 
@@ -749,6 +801,25 @@ rows (idempotent; never overwrites custom values).
 7. Confirm expiry / traffic warnings fire **once** as a service approaches its
    limit, and again after a renew / add-traffic.
 8. Confirm audit rows exist for the actions and no XUI credential is logged.
+
+## Phase 9 manual test checklist
+
+1. In the bot send `/support`, create a ticket (subject → message).
+2. Reply again to the ticket, this time attaching an image or document.
+3. Confirm the ticket appears under **Admin → Support → Tickets** (`/admin/tickets`).
+4. Open it, reply from the web (optionally attach a file), and confirm the
+   attachment opens via the auth-gated link.
+5. Confirm the user receives a Telegram notification of the reply.
+6. From Telegram as the owner, run `/admin_tickets`, open one, reply, set a
+   priority, and assign it to yourself.
+7. As the user, reply again, then close the ticket; reopen it if the setting allows.
+8. Confirm another user cannot open your ticket (bot shows "not found").
+9. Create a tutorial **category**, then an **Android V2Ray** tutorial.
+10. In the bot open `/tutorials`, browse to the tutorial, and read it.
+11. Buy/deliver a V2Ray service and confirm the **connection-guide** button appears
+    under the delivery message and opens the tutorial.
+12. Toggle the tutorial inactive and confirm it disappears from the bot.
+13. Confirm audit rows exist for ticket + tutorial actions and no secrets leak.
 
 ## Environment
 

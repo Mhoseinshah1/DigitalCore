@@ -13,6 +13,9 @@ from app.models.payment import Payment
 from app.models.license_item import LicenseItem
 from app.models.v2ray_service import V2RayService
 from app.models.wallet_topup import WalletTopupRequest
+from app.models.ticket import Ticket
+from app.models.ticket_message import TicketMessage
+from app.models.tutorial import Tutorial, TutorialCategory
 
 __all__ = [
     "Base",
@@ -29,4 +32,8 @@ __all__ = [
     "LicenseItem",
     "V2RayService",
     "WalletTopupRequest",
+    "Ticket",
+    "TicketMessage",
+    "Tutorial",
+    "TutorialCategory",
 ]

@@ -203,6 +203,28 @@ DEFAULTS: list[SettingDef] = [
                label_fa="غیرفعال‌سازی خودکار اتمام حجم",
                description_fa="پس از اتمام حجم سرویس، کلاینت پنل به‌صورت خودکار غیرفعال شود."),
 
+    # ---------------- Support tickets & tutorials (Phase 9) ----------------
+    SettingDef("ticket_attachments_enabled", "general", "bool", default="true",
+               label="Ticket attachments",
+               description="Allow users to attach a photo/document to support tickets.",
+               label_fa="پیوست تیکت",
+               description_fa="اجازه پیوست عکس/فایل به تیکت‌های پشتیبانی برای کاربران."),
+    SettingDef("max_ticket_attachment_mb", "general", "int", default="10",
+               label="Max ticket attachment (MB)",
+               description="Largest allowed ticket attachment size in megabytes.",
+               label_fa="حداکثر حجم پیوست تیکت (مگابایت)",
+               description_fa="بیشترین حجم مجاز پیوست تیکت بر حسب مگابایت."),
+    SettingDef("allow_reopen_closed_tickets", "general", "bool", default="true",
+               label="Allow reopening tickets",
+               description="Let users reopen a closed ticket instead of opening a new one.",
+               label_fa="اجازه بازگشایی تیکت",
+               description_fa="اجازه بازگشایی تیکت بسته‌شده به‌جای ایجاد تیکت جدید."),
+    SettingDef("tutorials_enabled", "general", "bool", default="true",
+               label="Tutorials enabled",
+               description="Show the tutorials / knowledge base to users.",
+               label_fa="فعال‌بودن آموزش‌ها",
+               description_fa="نمایش بخش آموزش‌ها/راهنما به کاربران."),
+
     # ---------------- Bot messages ----------------
     SettingDef("start_text", "texts", "text",
                label="Start message",

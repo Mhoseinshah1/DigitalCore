@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.tickets.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.tickets.title") }}</h1>
+  <p class="muted">{{ _("web.tickets.subtitle") }}</p>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.tickets.flash." ~ saved) if saved in ("replied","closed","assigned","priority") else _("web.licenses.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<p class="muted small">
+  {% for s in ("open","pending_admin","pending_user","closed") %}
+  {{ _("ticket.status." ~ s) }}: {{ counts.get(s, 0) }}{% if not loop.last %} · {% endif %}
+  {% endfor %}
+</p>
+
+<form method="get" action="/admin/tickets" class="inline-form" style="margin-bottom:1rem">
+  <select name="status">
+    <option value="">{{ _("web.tickets.all_statuses") }}</option>
+    {% for s in ("open","pending_admin","pending_user","closed") %}
+    <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ _("ticket.status." ~ s) }}</option>
+    {% endfor %}
+  </select>
+  <label class="switch">
+    <input type="checkbox" name="assigned" value="me" {% if assigned == "me" %}checked{% endif %}>
+    <span class="switch-track"></span>
+    <span class="switch-label">{{ _("web.tickets.assigned_to_me") }}</span>
+  </label>
+  <button type="submit" class="btn">{{ _("web.tickets.filter") }}</button>
+</form>
+
+{% if not tickets %}
+<section class="note"><p class="muted">{{ _("web.tickets.empty") }}</p></section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>{{ _("web.tickets.col.number") }}</th>
+        <th>{{ _("web.tickets.col.subject") }}</th>
+        <th>{{ _("web.tickets.col.user") }}</th>
+        <th>{{ _("web.tickets.col.status") }}</th>
+        <th>{{ _("web.tickets.col.priority") }}</th>
+        <th>{{ _("web.tickets.col.assigned") }}</th>
+        <th>{{ _("web.tickets.col.last") }}</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for tk in tickets %}
+        <tr>
+          <td><code>{{ tk.ticket_number }}</code></td>
+          <td>{{ tk.subject }}</td>
+          <td>{% if tk.user %}{{ tk.user.username or tk.user.telegram_id or ("#" ~ tk.user_id) }}{% else %}—{% endif %}</td>
+          <td><span class="pill {{ status_class.get(tk.status, '') }}">{{ _("ticket.status." ~ tk.status) }}</span></td>
+          <td><span class="pill">{{ _("ticket.priority." ~ tk.priority) }}</span></td>
+          <td class="muted small">{% if tk.assigned_admin %}{{ tk.assigned_admin.username }}{% else %}—{% endif %}</td>
+          <td class="muted small">{{ tk.last_message_at.strftime("%Y-%m-%d %H:%M") if tk.last_message_at else "—" }}</td>
+          <td class="actions"><a class="btn small" href="/admin/tickets/{{ tk.id }}">{{ _("web.tickets.view") }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
