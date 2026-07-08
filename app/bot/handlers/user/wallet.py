@@ -234,7 +234,11 @@ async def on_topup_amount(
         types = await payment_core_service.resolve_method_types(
             session, amount, user, exclude_wallet=True)
     # Remember the request + amount so the method/copy callbacks can read them.
-    await state.set_state(None)
+    # Arm the receipt-wait state now (not None): if the user jumps the gun and
+    # uploads a receipt while the method picker is on screen, it must still route
+    # to THIS top-up (topup_id is in state) — never fall through to the stateless
+    # product-order receipt handler and get cross-attached to an order.
+    await state.set_state(WalletStates.waiting_for_topup_receipt)
     await state.update_data(topup_id=topup.id, topup_amount=amount,
                             pay_amount=amount, card_number=cfg["card_number"])
 

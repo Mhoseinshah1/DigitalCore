@@ -335,6 +335,8 @@ def _pending_kb(_: "Callable[..., str]") -> InlineKeyboardMarkup:
 async def on_admin_dashboard(
     message: Message, _: "Callable[..., str]", lang: str = "fa", role: Role | None = None
 ) -> None:
+    if role is None:  # ordinary user typed a matching word → let it fall through
+        return
     if not has_permission(role, "view_dashboard"):
         await message.answer(_("admin.not_authorized"))
         return
@@ -346,6 +348,8 @@ async def on_admin_dashboard(
 async def on_admin_users_button(
     message: Message, _: "Callable[..., str]", lang: str = "fa", role: Role | None = None
 ) -> None:
+    if role is None:  # ordinary user typed a matching word → let it fall through
+        return
     if not has_permission(role, "view_users"):
         await message.answer(_("admin.not_authorized"))
         return
@@ -416,6 +420,8 @@ async def build_financial(_: "Callable[..., str]") -> str:
 async def on_admin_financial(
     message: Message, _: "Callable[..., str]", lang: str = "fa", role: Role | None = None
 ) -> None:
+    if role is None:  # ordinary user typed a matching word → let it fall through
+        return
     if not has_permission(role, "view_payments"):
         await message.answer(_("admin.not_authorized"))
         return

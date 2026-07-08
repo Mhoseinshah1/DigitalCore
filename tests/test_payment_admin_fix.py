@@ -328,6 +328,34 @@ async def test_topup_receipt_wrapper_catches_unexpected(db, monkeypatch) -> None
     assert msg.answers == [FA("wallet.topup.receipt_rejected", error="internal")]
 
 
+async def test_topup_multi_method_picker_arms_receipt_state(db) -> None:
+    # With more than one non-wallet method active the top-up shows a picker; the
+    # receipt-wait state must already be armed so a receipt sent in that window
+    # routes to THIS top-up, not the stateless product-order handler.
+    async with db() as s:
+        s.add(Setting(key="card_number", value="6037-0000"))
+        s.add(Setting(key="online_gateway_enabled", value="true"))
+        await s.commit()
+    await _seed_methods(db, [
+        dict(code="card", title="Card", method_type="manual_receipt", sort_order=0),
+        dict(code="og", title="Online", method_type="online_gateway", sort_order=1),
+    ])
+    state = FState()
+    msg = FM(FU(9401), text="50000")
+    await wallet_mod.on_topup_amount(msg, FA, state, lang="fa")
+    # Picker shown (multiple methods) AND receipt-wait state armed with topup_id.
+    assert state.state == wallet_mod.WalletStates.waiting_for_topup_receipt
+    assert state._data.get("topup_id") is not None
+    assert FA("btn.pay_card") in _labels(msg.markups[-1])
+
+    # A receipt uploaded during the picker window lands on the top-up.
+    photo = FM(FU(9401), photo=[FPhoto("f", 2048)])
+    await wallet_mod.on_topup_receipt(photo, FBot(), FA, state, lang="fa")
+    async with db() as s:
+        topups = await wallet_service.list_topups(s, status="waiting_admin")
+    assert any(str(tp.id) in " ".join(photo.answers) for tp in topups)
+
+
 # ==========================================================================
 # Bug 3 — card-to-card copy / paid / back buttons
 # ==========================================================================
@@ -421,14 +449,23 @@ async def test_admin_financial_button_responds(db) -> None:
     assert msg.markups[0] is not None
 
 
-async def test_admin_buttons_denied_without_permission(db) -> None:
+async def test_admin_buttons_ignore_non_admins(db) -> None:
+    # A non-admin (role=None) who happens to type a bare word that overlaps a
+    # menu label ("مالی", "کاربران", "Users"…) must NOT get the admin refusal —
+    # the handler falls through (like the admin fallback) so other routers see it.
     for handler in (panel_mod.on_admin_dashboard,
                     panel_mod.on_admin_users_button,
                     panel_mod.on_admin_financial):
         msg = FM(FU(1))
         await handler(msg, FA, lang="fa", role=None)
-        # No role → clear refusal, not a silent dead button.
-        assert msg.answers == [FA("admin.not_authorized")]
+        assert msg.answers == []
+
+
+async def test_admin_financial_denied_for_underprivileged_admin(db) -> None:
+    # An actual admin who lacks view_payments (SUPPORT) gets a clear refusal.
+    msg = FM(FU(1))
+    await panel_mod.on_admin_financial(msg, FA, lang="fa", role=Role.SUPPORT)
+    assert msg.answers == [FA("admin.not_authorized")]
 
 
 # ==========================================================================
