@@ -48,13 +48,22 @@ def get_adapter(
 
     adapter_cls = get_adapter_class(server.panel_type, server.panel_version)
     password = crypto.decrypt(server.encrypted_password) if server.encrypted_password else ""
+    token = crypto.decrypt(server.encrypted_api_token) if server.encrypted_api_token else None
+    # Prefer the API token unless the server is explicitly in password mode.
+    if getattr(server, "auth_mode", None) == "password":
+        token = None
     kwargs: dict[str, object] = {
         "base_url": server.base_url,
-        "username": server.username,
+        "username": server.username or "",
         "password": password,
         "web_base_path": server.web_base_path,
+        "api_token": token,
+        "tls_verify": bool(getattr(server, "tls_verify", True)),
         "transport": transport,
     }
+    timeout = getattr(server, "timeout_seconds", None)
+    if timeout:
+        kwargs["timeout"] = float(timeout)
     if sleep is not None:
         kwargs["sleep"] = sleep
     http = XuiHttpClient(**kwargs)  # type: ignore[arg-type]

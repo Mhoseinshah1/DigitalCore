@@ -12,6 +12,7 @@
       action="{% if server %}/admin/xui-servers/{{ server.id }}/edit{% else %}/admin/xui-servers/create{% endif %}"
       class="settings-form">
   <section class="panel">
+    <h2 class="panel-title">{{ _("web.xui.servers.form.section_connection") }}</h2>
     <div class="fields">
       <div class="field">
         <label for="name">{{ _("web.xui.servers.form.name") }}</label>
@@ -25,21 +26,102 @@
                value="{{ server.base_url if server else '' }}">
       </div>
       <div class="field">
+        <label for="web_base_path">{{ _("web.xui.servers.form.web_base_path") }}</label>
+        <input id="web_base_path" name="web_base_path" type="text" autocomplete="off"
+               placeholder="{{ _('web.xui.servers.form.web_base_path_ph') }}"
+               value="{{ server.web_base_path or '' if server else '' }}">
+        <small class="muted">{{ _("web.xui.servers.form.web_base_path_hint") }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">{{ _("web.xui.servers.form.section_auth") }}</h2>
+    <div class="fields">
+      <div class="field">
+        <label for="auth_mode">{{ _("web.xui.servers.form.auth_mode") }}</label>
+        <select id="auth_mode" name="auth_mode">
+          <option value="api_token"
+            {% if not server or server.auth_mode == "api_token" %}selected{% endif %}>
+            {{ _("web.xui.servers.form.auth_mode_api_token") }}
+          </option>
+          <option value="password"
+            {% if server and server.auth_mode == "password" %}selected{% endif %}>
+            {{ _("web.xui.servers.form.auth_mode_password") }}
+          </option>
+        </select>
+        <small class="muted">{{ _("web.xui.servers.form.auth_mode_hint") }}</small>
+      </div>
+      <div class="field">
+        <label for="api_token">
+          {{ _("web.xui.servers.form.api_token") }}
+          {% if server and server.encrypted_api_token %}
+            <span class="badge ok">{{ _("web.xui.servers.form.configured") }}</span>
+          {% else %}
+            <span class="badge muted">{{ _("web.xui.servers.form.not_configured") }}</span>
+          {% endif %}
+        </label>
+        <input id="api_token" name="api_token" type="password" autocomplete="new-password"
+               placeholder="{% if server %}{{ _('web.xui.servers.form.token_keep') }}{% endif %}">
+        {% if server %}<small class="muted">{{ _("web.xui.servers.form.token_hint") }}</small>{% endif %}
+      </div>
+      <div class="field">
         <label for="username">{{ _("web.xui.servers.form.username") }}</label>
         <input id="username" name="username" type="text" autocomplete="off"
                value="{{ server.username or '' if server else '' }}">
       </div>
       <div class="field">
-        <label for="password">{{ _("web.xui.servers.form.password") }}</label>
+        <label for="password">
+          {{ _("web.xui.servers.form.password") }}
+          {% if server and server.encrypted_password %}
+            <span class="badge ok">{{ _("web.xui.servers.form.configured") }}</span>
+          {% elif server %}
+            <span class="badge muted">{{ _("web.xui.servers.form.not_configured") }}</span>
+          {% endif %}
+        </label>
         <input id="password" name="password" type="password" autocomplete="new-password"
                placeholder="{% if server %}{{ _('web.xui.servers.form.password_keep') }}{% endif %}">
         {% if server %}<small class="muted">{{ _("web.xui.servers.form.password_hint") }}</small>{% endif %}
       </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">{{ _("web.xui.servers.form.section_subscription") }}</h2>
+    <div class="fields">
       <div class="field">
-        <label for="api_token">{{ _("web.xui.servers.form.api_token") }}</label>
-        <input id="api_token" name="api_token" type="password" autocomplete="new-password"
-               placeholder="{% if server %}{{ _('web.xui.servers.form.token_keep') }}{% endif %}">
-        {% if server %}<small class="muted">{{ _("web.xui.servers.form.token_hint") }}</small>{% endif %}
+        <label for="public_sub_base_url">{{ _("web.xui.servers.form.sub_base_url") }}</label>
+        <input id="public_sub_base_url" name="public_sub_base_url" type="text" autocomplete="off"
+               placeholder="https://sub.example.com:2096"
+               value="{{ server.public_sub_base_url or '' if server else '' }}">
+        <small class="muted">{{ _("web.xui.servers.form.sub_base_url_hint") }}</small>
+      </div>
+      <div class="field">
+        <label for="subscription_path">{{ _("web.xui.servers.form.subscription_path") }}</label>
+        <input id="subscription_path" name="subscription_path" type="text" autocomplete="off"
+               placeholder="/sub/"
+               value="{{ server.subscription_path or '' if server else '' }}">
+        <small class="muted">{{ _("web.xui.servers.form.subscription_path_hint") }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">{{ _("web.xui.servers.form.section_advanced") }}</h2>
+    <div class="fields">
+      <div class="field">
+        <label for="timeout_seconds">{{ _("web.xui.servers.form.timeout_seconds") }}</label>
+        <input id="timeout_seconds" name="timeout_seconds" type="number" min="1" max="120"
+               value="{{ server.timeout_seconds if server else 20 }}">
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="tls_verify"
+                 {% if not server or server.tls_verify %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.xui.servers.form.tls_verify") }}</span>
+        </label>
+        <small class="muted">{{ _("web.xui.servers.form.tls_verify_hint") }}</small>
       </div>
       <div class="field field-bool">
         <label class="switch">

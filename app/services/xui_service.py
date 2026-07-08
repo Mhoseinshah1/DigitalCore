@@ -124,49 +124,95 @@ async def delete_server(
 # --------------------------------------------------------------------------
 # Connectivity + sync
 # --------------------------------------------------------------------------
+def _normalize_inbound(raw: dict) -> dict:
+    """Panel inbound JSON → the fields we persist (network/security from stream)."""
+    import json as _json
+    network = security = None
+    stream = raw.get("streamSettings")
+    if stream:
+        try:
+            s = _json.loads(stream) if isinstance(stream, str) else stream
+            network = s.get("network")
+            security = s.get("security")
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return {
+        "remote_inbound_id": int(raw.get("id", 0) or 0),
+        "remark": (raw.get("remark") or None),
+        "protocol": (raw.get("protocol") or None),
+        "port": int(raw.get("port", 0) or 0) or None,
+        "network": network,
+        "security": security,
+        "tag": (raw.get("tag") or None),
+        "enable": bool(raw.get("enable", True)),
+        "raw_json": _json.dumps(raw)[:20000],
+    }
+
+
 async def test_connection(
     session: AsyncSession,
     server: XuiServer,
     *,
-    adapter: PanelAdapter | None = None,
     transport: httpx.BaseTransport | None = None,
     sleep: SleepFn | None = None,
 ) -> dict[str, object]:
-    """Log in and record the outcome as the server's status."""
-    a = adapter or build_adapter(server, transport=transport, sleep=sleep)
-    try:
-        await a.login()
-        status, ok, message = "online", True, "connected"
-    except XuiAuthError as exc:
-        status, ok, message = "auth_error", False, str(exc)
-    except XuiError as exc:
-        status, ok, message = "offline", False, str(exc)
-    finally:
-        if adapter is None:
-            await a.aclose()
+    """Rich connection test via the Sanaei API client (auth + status + inbounds).
 
-    server.status = status
+    Records the outcome (status, last error, panel/xray version) on the server.
+    Returns a secret-free diagnostic dict for the admin UI.
+    """
+    from app.services.sanaei_adapter import build_client
+
+    client = build_client(server, transport=transport, sleep=sleep)
+    try:
+        diag = await client.test_connection()
+    finally:
+        await client.aclose()
+
+    if diag["ok"]:
+        server.status = "online"
+        server.last_error = None
+    else:
+        err = str(diag.get("error") or "")
+        server.status = "auth_error" if err.startswith("auth:") else "offline"
+        server.last_error = err or "connection failed"
+    if diag.get("panel_version"):
+        server.panel_version = str(diag["panel_version"])[:32]
+    if diag.get("xray_version"):
+        server.xray_version = str(diag["xray_version"])[:32]
     server.last_health_check = _now()
     await session.commit()
-    return {"ok": ok, "status": status, "message": message}
+
+    return {
+        "ok": bool(diag["ok"]),
+        "status": server.status,
+        "message": ("connected" if diag["ok"] else (server.last_error or "failed")),
+        "auth_mode": diag.get("auth_mode"),
+        "inbound_count": diag.get("inbound_count"),
+        "panel_version": diag.get("panel_version"),
+        "xray_version": diag.get("xray_version"),
+        "server_status_ok": diag.get("server_status_ok"),
+    }
 
 
 async def sync_inbounds(
     session: AsyncSession,
     server: XuiServer,
     *,
-    adapter: PanelAdapter | None = None,
     transport: httpx.BaseTransport | None = None,
     sleep: SleepFn | None = None,
 ) -> int:
-    """Pull inbounds from the panel and upsert XuiInbound rows (idempotent)."""
-    a = adapter or build_adapter(server, transport=transport, sleep=sleep)
+    """Pull inbounds from the panel and upsert XuiInbound rows (idempotent).
+
+    Stores protocol/port/network/security/tag/raw_json and marks synced_at.
+    Missing inbounds are NOT deleted — they are left as-is (admin decides)."""
+    from app.services.sanaei_adapter import build_client
+
+    client = build_client(server, transport=transport, sleep=sleep)
     try:
-        await a.login()
-        inbounds = await a.list_inbounds()
+        raw_inbounds = await client.list_inbounds()
     finally:
-        if adapter is None:
-            await a.aclose()
+        await client.aclose()
 
     existing = {
         row.inbound_id: row
@@ -176,20 +222,33 @@ async def sync_inbounds(
             )
         ).scalars()
     }
-    for ib in inbounds:
-        row = existing.get(ib.inbound_id)
+    for raw in raw_inbounds:
+        if not isinstance(raw, dict):
+            continue
+        norm = _normalize_inbound(raw)
+        rid = norm["remote_inbound_id"]
+        if not rid:
+            continue
+        row = existing.get(rid)
         if row is None:
-            row = XuiInbound(server_id=server.id, inbound_id=ib.inbound_id)
+            # New row: seed is_active from the panel's enable. Existing rows keep
+            # their admin-set is_active (only the panel mirror is refreshed).
+            row = XuiInbound(server_id=server.id, inbound_id=rid, is_active=norm["enable"])
             session.add(row)
-        row.remark = ib.remark
-        row.protocol = ib.protocol
-        row.port = ib.port
-        row.is_active = ib.enable
+        row.remark = norm["remark"]
+        row.protocol = norm["protocol"]
+        row.port = norm["port"]
+        row.network = norm["network"]
+        row.security = norm["security"]
+        row.tag = norm["tag"]
+        row.enable_from_panel = norm["enable"]
+        row.raw_json = norm["raw_json"]
+        row.synced_at = _now()
 
     server.status = "online"
     server.last_health_check = _now()
     await session.commit()
-    return len(inbounds)
+    return len([r for r in raw_inbounds if isinstance(r, dict)])
 
 
 # --------------------------------------------------------------------------

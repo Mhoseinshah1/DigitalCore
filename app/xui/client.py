@@ -36,6 +36,8 @@ class XuiHttpClient:
         username: str,
         password: str,
         web_base_path: str | None = None,
+        api_token: str | None = None,
+        tls_verify: bool = True,
         timeout: float = 15.0,
         max_retries: int = 3,
         backoff_base: float = 0.5,
@@ -44,6 +46,9 @@ class XuiHttpClient:
     ) -> None:
         self._username = username
         self._password = password
+        # Bearer API token is preferred; when set we skip the cookie login and
+        # send the Authorization header on every request.
+        self._token = (api_token or "").strip() or None
         self._max_retries = max(1, max_retries)
         self._backoff_base = backoff_base
         self._sleep = sleep
@@ -53,9 +58,13 @@ class XuiHttpClient:
         self._base = f"{base}/{segment}" if segment else base
 
         self._client = httpx.AsyncClient(
-            timeout=timeout, transport=transport, follow_redirects=False
+            timeout=timeout, transport=transport, follow_redirects=False,
+            verify=tls_verify,
         )
         self._logged_in = False
+
+    def _auth_headers(self) -> dict[str, str] | None:
+        return {"Authorization": f"Bearer {self._token}"} if self._token else None
 
     @property
     def base(self) -> str:
@@ -72,7 +81,12 @@ class XuiHttpClient:
 
     # -- login ---------------------------------------------------------------
     async def login(self) -> None:
-        """Authenticate and store the session cookie. Raises XuiAuthError."""
+        """Authenticate and store the session cookie. Raises XuiAuthError.
+
+        A no-op when a Bearer API token is configured (auth is via the header)."""
+        if self._token:
+            self._logged_in = True
+            return
         url = f"{self._base}/login"
         try:
             resp = await self._client.post(
@@ -106,7 +120,8 @@ class XuiHttpClient:
         for attempt in range(self._max_retries):
             try:
                 resp = await self._client.request(
-                    method, url, data=data, json=json, params=params
+                    method, url, data=data, json=json, params=params,
+                    headers=self._auth_headers(),
                 )
             except httpx.TransportError as exc:
                 last_exc = exc
@@ -144,13 +159,16 @@ class XuiHttpClient:
 
         Re-logs in once on a 401 / expired session. Raises the typed errors.
         """
-        if not self._logged_in:
+        # Token auth needs no login; cookie auth logs in once up front.
+        if not self._token and not self._logged_in:
             await self.login()
 
         url = f"{self._base}{path}"
         resp = await self._send(method, url, data=data, json=json, params=params)
 
         if resp.status_code == 401:
+            if self._token:
+                raise XuiAuthError(f"{method} {path}: API token rejected (401)")
             if _allow_relogin:
                 self._logged_in = False
                 await self.login()  # the one re-login attempt

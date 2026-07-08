@@ -1112,6 +1112,31 @@ async def product_delete_or_hide(
     return RedirectResponse("/admin/products?saved=1", status_code=303)
 
 
+@router.get("/products/{product_id}/validate-binding", response_class=HTMLResponse)
+async def product_validate_binding(
+    product_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    live: int = 0,
+):
+    """Dry-run diagnostics for a V2Ray product's 3X-UI binding (no provisioning).
+
+    `?live=1` additionally performs a live auth + status + inbounds probe.
+    """
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    report = await v2ray_service.dry_run_validate_product(
+        session, product_id, test_connection=bool(live)
+    )
+    product = await product_service.get(session, product_id)
+    return render_template(
+        "product_validate.html",
+        _ctx(request, admin, product=product, report=report, live=bool(live)),
+    )
+
+
 # --------------------------------------------------------------------------
 # Product categories (bot UX): admin-managed groups the bot browses first.
 # --------------------------------------------------------------------------
@@ -1277,13 +1302,31 @@ async def audit_logs_page(
 # best-effort and never blocks CRUD. Credentials are never rendered.
 # --------------------------------------------------------------------------
 def _server_form_values(form: dict[str, object]) -> dict[str, object]:
-    """Extract server form fields. Password/token empty means 'keep existing'."""
+    """Extract server form fields. Password/token empty means 'keep existing'.
+
+    Config text fields (paths / URLs) round-trip through the form, so an empty
+    value clears them; secrets are the exception (empty = keep the stored one).
+    """
+    auth_mode = str(form.get("auth_mode", "")).strip()
+    if auth_mode not in ("api_token", "password"):
+        auth_mode = None
+    timeout_raw = str(form.get("timeout_seconds", "")).strip()
+    try:
+        timeout_seconds = int(timeout_raw) if timeout_raw else None
+    except ValueError:
+        timeout_seconds = None
     return {
         "name": str(form.get("name", "")).strip(),
         "base_url": str(form.get("base_url", "")).strip(),
         "username": str(form.get("username", "")).strip() or None,
         "password": str(form.get("password", "")) or None,
         "api_token": str(form.get("api_token", "")).strip() or None,
+        "auth_mode": auth_mode,
+        "web_base_path": str(form.get("web_base_path", "")).strip(),
+        "public_sub_base_url": str(form.get("public_sub_base_url", "")).strip(),
+        "subscription_path": str(form.get("subscription_path", "")).strip(),
+        "tls_verify": "tls_verify" in form,
+        "timeout_seconds": timeout_seconds,
         "is_active": "is_active" in form,
     }
 

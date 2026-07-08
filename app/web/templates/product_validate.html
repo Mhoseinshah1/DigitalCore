@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.products.validate.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.products.validate.title") }}</h1>
+  <p class="muted">
+    {% if product %}{{ product.title }} (#{{ product.id }}){% endif %}
+    — {{ _("web.products.validate.subtitle") }}
+  </p>
+</header>
+
+{% if report.ok %}
+<div class="alert ok">✅ {{ _("web.products.validate.ok") }}</div>
+{% else %}
+<div class="alert error">⚠️ {{ _("web.products.validate.failed") }}</div>
+{% endif %}
+
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.products.validate.col.check") }}</th>
+          <th>{{ _("web.products.validate.col.result") }}</th>
+          <th>{{ _("web.products.validate.col.detail") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in report.checks %}
+        <tr>
+          <td>{{ _("web.products.validate.check." ~ c.check) }}</td>
+          <td>
+            {% if c.ok %}<span class="pill ok">✓</span>
+            {% else %}<span class="pill danger">✗</span>{% endif %}
+          </td>
+          <td class="muted small">{{ c.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if report.connection %}
+<section class="panel">
+  <h2 class="panel-title">{{ _("web.products.validate.connection") }}</h2>
+  <ul class="kv">
+    <li><span>{{ _("web.products.validate.conn.ok") }}</span>
+      <strong>{{ "✓" if report.connection.ok else "✗" }}</strong></li>
+    <li><span>{{ _("web.products.validate.conn.auth_mode") }}</span>
+      <strong>{{ report.connection.auth_mode or "—" }}</strong></li>
+    <li><span>{{ _("web.products.validate.conn.inbounds") }}</span>
+      <strong>{{ report.connection.inbound_count if report.connection.inbound_count is not none else "—" }}</strong></li>
+    <li><span>{{ _("web.products.validate.conn.panel_version") }}</span>
+      <strong>{{ report.connection.panel_version or "—" }}</strong></li>
+    <li><span>{{ _("web.products.validate.conn.message") }}</span>
+      <strong class="muted">{{ report.connection.message or "" }}</strong></li>
+  </ul>
+</section>
+{% endif %}
+
+<div class="form-actions">
+  {% if not live %}
+  <a class="btn primary" href="/admin/products/{{ report.product_id }}/validate-binding?live=1">
+    🔌 {{ _("web.products.validate.run_live") }}
+  </a>
+  {% endif %}
+  <a class="btn" href="/admin/products/{{ report.product_id }}/edit">{{ _("web.products.validate.back_edit") }}</a>
+  <a class="btn" href="/admin/products">{{ _("web.products.validate.back_list") }}</a>
+</div>
+{% endblock %}
