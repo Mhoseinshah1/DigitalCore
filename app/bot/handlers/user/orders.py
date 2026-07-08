@@ -773,42 +773,116 @@ async def on_receipt_next_phase(
     await callback.answer(_("notify.receipt.next_phase"), show_alert=True)
 
 
-def _order_lines(o, lang: str, _: Callable[..., str]) -> list[str]:
-    """A readable multi-line block for one order (My Orders)."""
+# --------------------------------------------------------------------------
+# «سفارش‌های من» — paginated list + per-order detail.
+# --------------------------------------------------------------------------
+PAGE_SIZE = 5
+CB_ORDER_PAGE = "uordpg:"   # list page N
+CB_ORDER_DETAIL = "uord:"   # order detail: <id>:<page>
+CB_LIST_CLOSE = "ulistx"    # close an inline list (back to the reply menu)
+
+
+def _clamp_page(page: int, total: int) -> tuple[int, int]:
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    return max(0, min(page, pages - 1)), pages
+
+
+async def _edit_or_send(callback: CallbackQuery, text: str, kb: InlineKeyboardMarkup) -> None:
+    """Edit the inline message in place; fall back to a fresh message if edit fails."""
+    msg = callback.message
+    if msg is None:
+        return
+    try:
+        await msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:  # noqa: BLE001 - message unchanged / too old / not editable
+        await msg.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+def _order_summary(o, index: int, lang: str, _: Callable[..., str]) -> str:
+    title = o.product.title if o.product else "—"
+    return "\n".join([
+        _("orders.row.item", index=index, number=o.order_number, title=title),
+        _("orders.row.status", status=order_status_label(o.status, lang)),
+        _("orders.row.amount", amount=f"{o.final_amount:,}"),
+    ])
+
+
+async def _build_orders_page(session, user_id: int, page: int, lang: str,
+                             _: Callable[..., str]) -> tuple[str, InlineKeyboardMarkup]:
+    total = await order_service.count_user_orders(session, user_id)
+    page, pages = _clamp_page(page, total)
+    orders = await order_service.list_user_orders(
+        session, user_id, limit=PAGE_SIZE, offset=page * PAGE_SIZE)
+
+    lines = [_("orders.user.title"), _("orders.page_of", page=page + 1, pages=pages), ""]
+    detail_buttons: list[InlineKeyboardButton] = []
+    for i, o in enumerate(orders):
+        index = page * PAGE_SIZE + i + 1
+        lines.append(_order_summary(o, index, lang, _))
+        lines.append("")
+        detail_buttons.append(InlineKeyboardButton(
+            text=_("orders.btn.detail", index=index),
+            callback_data=f"{CB_ORDER_DETAIL}{o.id}:{page}"))
+
+    rows: list[list[InlineKeyboardButton]] = [detail_buttons[i:i + 2]
+                                              for i in range(0, len(detail_buttons), 2)]
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text=_("btn.prev"),
+                                        callback_data=f"{CB_ORDER_PAGE}{page - 1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(text=_("btn.next"),
+                                        callback_data=f"{CB_ORDER_PAGE}{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text=_("btn.back"), callback_data=CB_LIST_CLOSE)])
+    return "\n".join(lines).rstrip(), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _order_detail_text(session, o, lang: str, _: Callable[..., str]) -> str:
+    from app.services import product_category_service
     title = o.product.title if o.product else "—"
     method_key = f"order.method.{o.payment_method}"
     method = _(method_key)
     if method == method_key:
         method = _("order.method.unknown")
     lines = [
+        _("orders.detail.title"), "",
         _("orders.row.number", number=o.order_number),
         _("orders.row.product", title=title),
-        _("orders.row.status", status=order_status_label(o.status, lang)),
     ]
+    if o.product is not None and o.product.category_id:
+        cat = await product_category_service.get(session, o.product.category_id)
+        if cat is not None:
+            lines.append(_("orders.row.category", category=cat.title))
+    lines.append(_("orders.row.status", status=order_status_label(o.status, lang)))
+    lines.append(_("orders.row.method", method=method))
     if o.discount_amount:
         lines.append(_("orders.row.original", amount=f"{o.amount:,}"))
+        lines.append(_("orders.row.discount", amount=f"{o.discount_amount:,}"))
     lines.append(_("orders.row.amount", amount=f"{o.final_amount:,}"))
-    lines.append(_("orders.row.method", method=method))
     if o.created_at:
         lines.append(_("orders.row.date", date=o.created_at.strftime("%Y-%m-%d %H:%M")))
+    if o.paid_at:
+        lines.append(_("orders.row.paid_at", date=o.paid_at.strftime("%Y-%m-%d %H:%M")))
+    if o.delivered_at:
+        lines.append(_("orders.row.delivered_at", date=o.delivered_at.strftime("%Y-%m-%d %H:%M")))
     if o.status == "rejected" and o.reject_reason:
         lines.append(_("orders.row.reject", reason=o.reject_reason))
     delivery_key = "order.delivery.delivered" if o.delivered_at else "order.delivery.pending"
     lines.append(_("orders.row.delivery", delivery=_(delivery_key)))
-    return lines
+    return "\n".join(lines)
 
 
 async def render_orders(reply, tg_user, _: Callable[..., str], lang: str) -> None:
-    """Render the caller's orders. Shared by the /orders handler and the account page."""
+    """Render the caller's orders (page 1). Shared by /orders and the account page."""
     async with SessionLocal() as session:
         user = await user_service.get_by_telegram_id(session, tg_user.id)
-        orders = await order_service.list_user_orders(session, user.id) if user else []
-    if not orders:
-        await reply.answer(_("orders.user.empty"))
-        return
-    blocks = ["\n".join(_order_lines(o, lang, _)) for o in orders]
-    await reply.answer(
-        _("orders.user.title") + "\n\n" + "\n\n".join(blocks), parse_mode="HTML")
+        if user is None or await order_service.count_user_orders(session, user.id) == 0:
+            await reply.answer(_("orders.user.empty"))
+            return
+        text, kb = await _build_orders_page(session, user.id, 0, lang, _)
+    await reply.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(Command("orders"))
@@ -818,6 +892,52 @@ async def on_orders(
 ) -> None:
     await state.clear()
     await render_orders(message, message.from_user, _, lang)
+
+
+@router.callback_query(F.data.startswith(CB_ORDER_PAGE))
+async def on_orders_page(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    page = int((callback.data or "0")[len(CB_ORDER_PAGE):] or 0)
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, callback.from_user.id)
+        if user is None:
+            await callback.answer(_("orders.user.empty"), show_alert=True)
+            return
+        text, kb = await _build_orders_page(session, user.id, page, lang, _)
+    await _edit_or_send(callback, text, kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(CB_ORDER_DETAIL))
+async def on_order_detail(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    raw = (callback.data or "")[len(CB_ORDER_DETAIL):]
+    order_id_s, _sep, page_s = raw.partition(":")
+    try:
+        order_id, page = int(order_id_s), int(page_s or 0)
+    except ValueError:
+        await callback.answer()
+        return
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, callback.from_user.id)
+        order = await order_service.get_order(session, order_id)
+        # Only ever show the caller's own order.
+        if user is None or order is None or order.user_id != user.id:
+            await callback.answer(_("orders.detail.not_found"), show_alert=True)
+            return
+        text = await _order_detail_text(session, order, lang, _)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=_("btn.back"), callback_data=f"{CB_ORDER_PAGE}{page}")]])
+    await _edit_or_send(callback, text, kb)
+    await callback.answer()
+
+
+# --------------------------------------------------------------------------
+# «لایسنس‌های من» — configurable-title paginated list + per-item detail.
+# --------------------------------------------------------------------------
+CB_LIC_PAGE = "ulicpg:"   # license list page N
 
 
 class LicenseButtonFilter(BaseFilter):
@@ -839,31 +959,83 @@ class LicenseButtonFilter(BaseFilter):
         return bool(title) and text == title
 
 
+async def _license_section_title(session, _: Callable[..., str]) -> str:
+    return (await SettingsService(session)
+            .get_str("license_section_title", "")).strip() or _("licenses.user.title")
+
+
+async def _build_licenses_page(session, user_id: int, page: int,
+                               _: Callable[..., str]) -> tuple[str, InlineKeyboardMarkup]:
+    title_text = await _license_section_title(session, _)
+    total = await license_service.count_user_licenses(session, user_id)
+    page, pages = _clamp_page(page, total)
+    licenses = await license_service.list_user_licenses(
+        session, user_id, limit=PAGE_SIZE, offset=page * PAGE_SIZE)
+
+    # Resolve order numbers for this page (order_id -> order_number).
+    order_ids = [lic.order_id for lic in licenses if lic.order_id]
+    numbers: dict[int, str] = {}
+    for oid in order_ids:
+        o = await order_service.get_order(session, oid)
+        if o is not None:
+            numbers[oid] = o.order_number
+
+    lines = [title_text, _("orders.page_of", page=page + 1, pages=pages), "",
+             _("licenses.user.pick"), ""]
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, lic in enumerate(licenses):
+        index = page * PAGE_SIZE + i + 1
+        prod = lic.product.title if lic.product else "—"
+        number = numbers.get(lic.order_id or 0, "—")
+        lines.append(_("licenses.row.item", index=index, number=number, title=prod))
+        rows.append([InlineKeyboardButton(
+            text=_("licenses.btn.item", index=index, number=number, title=prod)[:64],
+            callback_data=f"{CB_LICENSE}{lic.id}:{page}")])
+
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text=_("btn.prev"),
+                                        callback_data=f"{CB_LIC_PAGE}{page - 1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(text=_("btn.next"),
+                                        callback_data=f"{CB_LIC_PAGE}{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text=_("btn.back"), callback_data=CB_LIST_CLOSE)])
+    return "\n".join(lines).rstrip(), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _license_detail_text(order, lic, lang: str, _: Callable[..., str]) -> str:
+    number = order.order_number if order is not None else "—"
+    product = lic.product.title if lic.product else "—"
+    sold = lic.sold_at.strftime("%Y-%m-%d") if lic.sold_at else "—"
+    lines = [
+        _("licenses.detail.title"), "",
+        _("licenses.detail.order", number=number),
+        _("licenses.detail.product", title=product),
+        _("licenses.detail.date", date=sold),
+        _("licenses.detail.status", status=_("order.delivery.delivered")),
+        "",
+        _("license.delivery.email_label"), f"<code>{lic.email}</code>",
+        "",
+        _("license.delivery.password_label"), f"<code>{lic.password}</code>",
+    ]
+    if lic.note:
+        lines += ["", _("license.delivery.note_label"), lic.note]
+    lines += ["", _("license.delivery.keep_safe")]
+    return "\n".join(lines)
+
+
 async def render_my_licenses(reply, tg_user, _: Callable[..., str], lang: str) -> None:
-    """Render the caller's license items using the configurable section title."""
+    """Render the caller's licenses (page 1) using the configurable section title."""
     async with SessionLocal() as session:
         user = await user_service.get_by_telegram_id(session, tg_user.id)
-        licenses = await license_service.list_user_licenses(session, user.id) if user else []
-        title_text = (await SettingsService(session)
-                      .get_str("license_section_title", "")).strip() or _("licenses.user.title")
-
-    if not licenses:
-        await reply.answer(f"{title_text}\n\n{_('licenses.user.empty')}")
-        return
-
-    lines = [title_text, ""]
-    buttons: list[list[InlineKeyboardButton]] = []
-    for lic in licenses:
-        title = lic.product.title if lic.product else "—"
-        sold = lic.sold_at.strftime("%Y-%m-%d") if lic.sold_at else ""
-        order_no = f" · #{lic.order_id}" if lic.order_id else ""
-        lines.append(f"• {title}{order_no} · {sold}")
-        buttons.append([InlineKeyboardButton(
-            text=title, callback_data=f"{CB_LICENSE}{lic.id}")])
-    await reply.answer(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-    )
+        title_text = await _license_section_title(session, _)
+        if user is None or await license_service.count_user_licenses(session, user.id) == 0:
+            await reply.answer(f"{title_text}\n\n{_('licenses.user.empty')}")
+            return
+        text, kb = await _build_licenses_page(session, user.id, 0, _)
+    await reply.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.message(Command("my_licenses"))
@@ -876,22 +1048,54 @@ async def on_my_licenses(
     await render_my_licenses(message, message.from_user, _, lang)
 
 
+@router.callback_query(F.data.startswith(CB_LIC_PAGE))
+async def on_licenses_page(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    page = int((callback.data or "0")[len(CB_LIC_PAGE):] or 0)
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, callback.from_user.id)
+        if user is None:
+            await callback.answer(_("licenses.user.empty"), show_alert=True)
+            return
+        text, kb = await _build_licenses_page(session, user.id, page, _)
+    await _edit_or_send(callback, text, kb)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith(CB_LICENSE))
 async def on_license_detail(
     callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
 ) -> None:
-    license_id = int((callback.data or "0")[len(CB_LICENSE):])
-    tg_user = callback.from_user
-    text: str | None = None
+    raw = (callback.data or "")[len(CB_LICENSE):]
+    lic_id_s, _sep, page_s = raw.partition(":")
+    try:
+        license_id, page = int(lic_id_s), int(page_s or 0)
+    except ValueError:
+        await callback.answer()
+        return
     async with SessionLocal() as session:
-        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        user = await user_service.get_by_telegram_id(session, callback.from_user.id)
         lic = await license_service.get_license(session, license_id)
         # Never reveal a license that is not this user's.
         if user is None or lic is None or lic.sold_to_user_id != user.id:
             await callback.answer(_("licenses.user.not_found"), show_alert=True)
             return
         order = await order_service.get_order(session, lic.order_id) if lic.order_id else None
-        text = license_service.build_delivery_message(order, lic.product, lic, lang)
-    if callback.message is not None and text:
-        await callback.message.answer(text, parse_mode="HTML")
+        text = _license_detail_text(order, lic, lang, _)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=_("btn.back"), callback_data=f"{CB_LIC_PAGE}{page}")]])
+    await _edit_or_send(callback, text, kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == CB_LIST_CLOSE)
+async def on_list_close(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    if callback.message is not None:
+        try:
+            await callback.message.delete()
+        except Exception:  # noqa: BLE001 - deleting an old message may fail
+            pass
     await callback.answer()

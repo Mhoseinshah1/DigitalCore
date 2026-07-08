@@ -22,7 +22,9 @@ def user_main_menu(
         [KeyboardButton(text=t("btn.my_services", lang)), KeyboardButton(text=lic)],
         [KeyboardButton(text=t("btn.wallet", lang)), KeyboardButton(text=t("btn.account", lang))],
         [KeyboardButton(text=t("btn.tutorials", lang)), KeyboardButton(text=t("btn.support", lang))],
-        [KeyboardButton(text=t("btn.referral", lang)), KeyboardButton(text=t("btn.language", lang))],
+        # Language is NOT in the menu — the bot language is set from admin settings
+        # (`bot_default_language`); users can still switch via the /language command.
+        [KeyboardButton(text=t("btn.referral", lang))],
     ]
     if is_admin:
         rows.append([KeyboardButton(text=t("btn.admin_panel", lang))])

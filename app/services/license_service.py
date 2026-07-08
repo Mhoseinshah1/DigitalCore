@@ -254,12 +254,22 @@ async def list_sold(session: AsyncSession, *, limit: int = 100, offset: int = 0)
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def list_user_licenses(session: AsyncSession, user_id: int, *, limit: int = 50) -> list[LicenseItem]:
+async def list_user_licenses(
+    session: AsyncSession, user_id: int, *, limit: int = 50, offset: int = 0
+) -> list[LicenseItem]:
     stmt = (select(LicenseItem)
             .where(LicenseItem.sold_to_user_id == user_id, LicenseItem.status == "sold")
             .order_by(LicenseItem.sold_at.desc().nullslast(), LicenseItem.id.desc())
-            .limit(limit))
+            .limit(limit).offset(offset))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def count_user_licenses(session: AsyncSession, user_id: int) -> int:
+    return int(await session.scalar(
+        select(func.count(LicenseItem.id)).where(
+            LicenseItem.sold_to_user_id == user_id, LicenseItem.status == "sold"
+        )
+    ) or 0)
 
 
 async def count_available(session: AsyncSession, product_id: int) -> int:

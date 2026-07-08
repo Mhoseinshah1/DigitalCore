@@ -75,6 +75,15 @@ DEFAULTS: list[SettingDef] = [
                description="Displayed name of the platform.",
                label_fa="نام سایت",
                description_fa="نام نمایشی پلتفرم."),
+    SettingDef("bot_default_language", "general", "string", default="fa",
+               label="Bot default language",
+               description="Default bot language (fa or en) for new users. The bot "
+                           "no longer asks language on /start; users can still switch "
+                           "with the /language command.",
+               label_fa="زبان پیش‌فرض ربات",
+               description_fa="زبان پیش‌فرض ربات (fa یا en) برای کاربران جدید. ربات دیگر "
+                              "هنگام /start زبان را نمی‌پرسد؛ کاربران می‌توانند با دستور "
+                              "/language زبان را عوض کنند."),
     SettingDef("maintenance_mode", "general", "bool", default="false",
                env_var="MAINTENANCE_MODE",
                label="Maintenance mode",

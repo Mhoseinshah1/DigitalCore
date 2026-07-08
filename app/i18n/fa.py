@@ -36,6 +36,7 @@ CATALOG: dict[str, str] = {
     "lang.fa_label": "فارسی",
     "lang.en_label": "English",
     "lang.saved": "✅ زبان ذخیره شد.",
+    "lang.managed_by_admin": "🌐 زبان ربات از تنظیمات مدیریت انتخاب می‌شود. برای تغییر زبان خودتان از دستور /language استفاده کنید.",
 
     # --- bot: settings editor ------------------------------------------------
     "settings.not_authorized": "⛔️ شما مجاز به مدیریت تنظیمات نیستید.",
@@ -396,6 +397,11 @@ CATALOG: dict[str, str] = {
     "nav.payments.receipts": "رسیدها",
     "nav.bot": "تنظیمات ربات",
     "nav.bot.messages": "پیام‌های ربات",
+    "nav.bot.notifications": "اطلاع‌رسانی",
+    "web.notifications.title": "📢 اطلاع‌رسانی",
+    "web.notifications.subtitle": "ارسال اطلاعیه به کاربران ربات.",
+    "web.notifications.body": "این بخش برای ارسال اطلاعیه به کاربران آماده‌سازی شده است.",
+    "web.notifications.hint": "قابلیت ارسال گروهی پیام در نسخه‌های بعدی اضافه می‌شود.",
     "nav.system": "تنظیمات سیستم",
     "nav.system.general": "تنظیمات عمومی",
     "nav.system.telegram": "تنظیمات تلگرام",
@@ -601,6 +607,17 @@ CATALOG: dict[str, str] = {
     "orders.row.date": "تاریخ: {date}",
     "orders.row.reject": "دلیل رد: {reason}",
     "orders.row.delivery": "تحویل: {delivery}",
+    "orders.row.item": "{index}) سفارش <code>{number}</code> — {title}",
+    "orders.row.category": "دسته‌بندی: {category}",
+    "orders.row.discount": "تخفیف: {amount} تومان",
+    "orders.row.paid_at": "تاریخ پرداخت: {date}",
+    "orders.row.delivered_at": "تاریخ تحویل: {date}",
+    "orders.page_of": "صفحه {page} از {pages}",
+    "orders.btn.detail": "جزئیات {index}",
+    "orders.detail.title": "📦 <b>جزئیات سفارش</b>",
+    "orders.detail.not_found": "این سفارش پیدا نشد.",
+    "btn.prev": "⬅️ قبلی",
+    "btn.next": "بعدی ➡️",
     # --- «حساب من» (account page) ------------------------------------------------
     "account.title": "👤 <b>حساب من</b>",
     "account.name": "نام: {name}",
@@ -768,9 +785,17 @@ CATALOG: dict[str, str] = {
 
     # --- Phase 5: bot user licenses ---------------------------------------------
     "btn.my_licenses": "🔑 لایسنس‌های من",
-    "licenses.user.title": "🔑 <b>لایسنس‌های شما</b>",
-    "licenses.user.empty": "شما هنوز لایسنسی خریداری نکرده‌اید.",
+    "licenses.user.title": "🎫 <b>لایسنس‌های شما</b>",
+    "licenses.user.empty": "هنوز موردی برای شما ثبت نشده است.",
     "licenses.user.not_found": "لایسنس پیدا نشد.",
+    "licenses.user.pick": "برای مشاهده جزئیات، یکی را انتخاب کنید:",
+    "licenses.row.item": "{index}) سفارش <code>{number}</code> — {title}",
+    "licenses.btn.item": "{index}) {number} — {title}",
+    "licenses.detail.title": "🎫 <b>جزئیات لایسنس</b>",
+    "licenses.detail.order": "شماره سفارش: <code>{number}</code>",
+    "licenses.detail.product": "محصول: {title}",
+    "licenses.detail.date": "تاریخ خرید: {date}",
+    "licenses.detail.status": "وضعیت: {status}",
 
     # --- Phase 5: bot admin licenses --------------------------------------------
     "admin.licenses.none": "هیچ محصول لایسنسی وجود ندارد.",

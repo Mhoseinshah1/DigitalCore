@@ -271,6 +271,20 @@ state. **«سفارش‌های من»** now renders a readable multi-line block 
 status). New settings: `license_section_title` (texts) and
 `online_gateway_enabled` (payment, default off).
 
+**Bot UX follow-up (orders/licenses/menu).** «سفارش‌های من» and «لایسنس‌های من»
+are now **paginated inline lists** (5/page) with per-item **detail views** —
+orders show number/product/category/status/method/amounts/dates/reject-reason;
+licenses show a **numbered list** (order number + product), and tapping one opens
+its credentials **only for the owner of that order**; navigation edits the message
+in place (`edit_message_text`) and falls back to a fresh message. **Language is
+removed from the menu**: the bot language follows the `bot_default_language`
+setting (fa/en, default fa) and is no longer asked on `/start`; users can still
+switch with `/language`, and a cached «زبان» button explains it's admin-managed.
+The «منوی کاربر» button now reliably returns the user menu (it was crashing) and
+clears any pending FSM flow. Admin web: `/admin/dashboard` redirects to `/admin`,
+the dashboard degrades gracefully if report data fails, and a safe
+**`/admin/notifications`** («اطلاع‌رسانی») page + sidebar link are added.
+
 **Deploying this change (runtime).** The category feature adds migration **0019**
 and maps `Product.category_id`. Because the container entrypoint does **not**
 auto-migrate by default, a deploy that only rebuilds images without running

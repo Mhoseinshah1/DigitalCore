@@ -36,6 +36,7 @@ CATALOG: dict[str, str] = {
     "lang.fa_label": "فارسی",
     "lang.en_label": "English",
     "lang.saved": "✅ Language saved.",
+    "lang.managed_by_admin": "🌐 The bot language is set from admin settings. Use the /language command to change your own language.",
 
     # --- bot: settings editor ------------------------------------------------
     "settings.not_authorized": "⛔️ You are not authorized to manage settings.",
@@ -396,6 +397,11 @@ CATALOG: dict[str, str] = {
     "nav.payments.receipts": "Receipts",
     "nav.bot": "Bot settings",
     "nav.bot.messages": "Bot messages",
+    "nav.bot.notifications": "Notifications",
+    "web.notifications.title": "📢 Notifications",
+    "web.notifications.subtitle": "Send announcements to bot users.",
+    "web.notifications.body": "This section is prepared for sending announcements to users.",
+    "web.notifications.hint": "Mass broadcast will be added in a later release.",
     "nav.system": "System settings",
     "nav.system.general": "General settings",
     "nav.system.telegram": "Telegram settings",
@@ -601,6 +607,17 @@ CATALOG: dict[str, str] = {
     "orders.row.date": "Date: {date}",
     "orders.row.reject": "Rejection reason: {reason}",
     "orders.row.delivery": "Delivery: {delivery}",
+    "orders.row.item": "{index}) Order <code>{number}</code> — {title}",
+    "orders.row.category": "Category: {category}",
+    "orders.row.discount": "Discount: {amount} Toman",
+    "orders.row.paid_at": "Paid at: {date}",
+    "orders.row.delivered_at": "Delivered at: {date}",
+    "orders.page_of": "Page {page} of {pages}",
+    "orders.btn.detail": "Details {index}",
+    "orders.detail.title": "📦 <b>Order details</b>",
+    "orders.detail.not_found": "This order was not found.",
+    "btn.prev": "⬅️ Prev",
+    "btn.next": "Next ➡️",
     # --- My Account page --------------------------------------------------------
     "account.title": "👤 <b>My Account</b>",
     "account.name": "Name: {name}",
@@ -768,9 +785,17 @@ CATALOG: dict[str, str] = {
 
     # --- Phase 5: bot user licenses ---------------------------------------------
     "btn.my_licenses": "🔑 My Licenses",
-    "licenses.user.title": "🔑 <b>Your licenses</b>",
-    "licenses.user.empty": "You have not purchased any licenses yet.",
+    "licenses.user.title": "🎫 <b>Your licenses</b>",
+    "licenses.user.empty": "Nothing has been registered for you yet.",
     "licenses.user.not_found": "License not found.",
+    "licenses.user.pick": "Choose one to view its details:",
+    "licenses.row.item": "{index}) Order <code>{number}</code> — {title}",
+    "licenses.btn.item": "{index}) {number} — {title}",
+    "licenses.detail.title": "🎫 <b>License details</b>",
+    "licenses.detail.order": "Order number: <code>{number}</code>",
+    "licenses.detail.product": "Product: {title}",
+    "licenses.detail.date": "Purchase date: {date}",
+    "licenses.detail.status": "Status: {status}",
 
     # --- Phase 5: bot admin licenses --------------------------------------------
     "admin.licenses.none": "No license products exist.",

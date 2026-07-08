@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.notifications.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("web.notifications.title") }}</h1>
+  <p class="muted">{{ _("web.notifications.subtitle") }}</p>
+</header>
+
+<section class="panel">
+  <p>{{ _("web.notifications.body") }}</p>
+  <p class="muted small">{{ _("web.notifications.hint") }}</p>
+</section>
+{% endblock %}

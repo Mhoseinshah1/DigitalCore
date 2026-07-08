@@ -172,15 +172,22 @@ async def get_order_by_number(session: AsyncSession, order_number: str) -> Order
 
 
 async def list_user_orders(
-    session: AsyncSession, user_id: int, *, limit: int = 20
+    session: AsyncSession, user_id: int, *, limit: int = 20, offset: int = 0
 ) -> list[Order]:
     stmt = (
         select(Order)
         .where(Order.user_id == user_id)
         .order_by(Order.id.desc())
         .limit(limit)
+        .offset(offset)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def count_user_orders(session: AsyncSession, user_id: int) -> int:
+    return int(await session.scalar(
+        select(func.count(Order.id)).where(Order.user_id == user_id)
+    ) or 0)
 
 
 async def latest_pending_order(session: AsyncSession, user_id: int) -> Order | None:
