@@ -59,6 +59,15 @@ async def _maintenance_sweep() -> None:
     except Exception as exc:  # noqa: BLE001 - error isolation: never crash the loop
         log.warning("maintenance sweep failed: %s", exc)
 
+    # Payment Core cleanup: expire stale unpaid invoices / pending payments.
+    try:
+        from app.database import SessionLocal
+        from app.services import payment_cleanup_service
+        async with SessionLocal() as session:
+            await payment_cleanup_service.run_payment_cleanup(session)
+    except Exception as exc:  # noqa: BLE001 - error isolation: never crash the loop
+        log.warning("payment cleanup sweep failed: %s", exc)
+
 
 # One maintenance sweep per this many heartbeats (~1 hour at 30s ticks).
 MAINTENANCE_EVERY_TICKS = max(1, 3600 // HEARTBEAT_SECONDS)

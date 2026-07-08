@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.pay.detail_title") }} #{{ payment.id }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>{{ _("web.pay.detail_title") }} #{{ payment.id }}</h1>
+    <p class="muted mono">{{ payment.tracking_code or "" }}</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/admin/payments">{{ _("web.pay.back") }}</a>
+  </div>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.pay.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.pay.error", error=error) }}</div>{% endif %}
+
+<div class="detail-grid">
+  <section class="panel">
+    <h2 class="panel-title">💳 {{ _("web.pay.info") }}</h2>
+    <table class="kv">
+      <tr><th>{{ _("web.pay.col.type") }}</th><td>{{ _("web.pay.type." ~ payment.payment_type) }}</td></tr>
+      <tr><th>{{ _("web.pay.col.method") }}</th><td>{{ payment.method }}</td></tr>
+      <tr><th>{{ _("web.pay.col.amount") }}</th><td>{{ "{:,}".format(payment.amount) }} تومان</td></tr>
+      {% if payment.bonus_amount %}
+      <tr><th>{{ _("web.pay.bonus") }}</th><td>{{ "{:,}".format(payment.bonus_amount) }}</td></tr>
+      {% endif %}
+      <tr><th>{{ _("web.pay.col.status") }}</th><td>
+        {% set tone = {"approved": "ok", "receipt_submitted": "warn", "pending": "muted",
+                       "rejected": "danger", "failed": "danger", "expired": "muted",
+                       "cancelled": "muted"}.get(payment.status, "muted") %}
+        <span class="pill {{ tone }}">{{ _("web.pay.status." ~ payment.status) }}</span></td></tr>
+      {% if payment.reject_reason %}
+      <tr><th>{{ _("web.pay.reject_reason") }}</th><td>{{ payment.reject_reason }}</td></tr>
+      {% endif %}
+      <tr><th>{{ _("web.pay.col.submitted") }}</th>
+        <td>{% if payment.submitted_at %}{{ payment.submitted_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</td></tr>
+      {% if invoice %}
+      <tr><th>{{ _("web.pay.invoice") }}</th>
+        <td class="mono">{{ invoice.invoice_number }} · {{ _("web.pay.inv_status." ~ invoice.status) }}</td></tr>
+      {% endif %}
+      {% if order %}
+      <tr><th>{{ _("web.pay.order") }}</th>
+        <td><a href="/admin/orders/{{ order.id }}">{{ order.order_number }}</a>
+            {% if order.product %} · {{ order.product.title }}{% endif %}</td></tr>
+      {% endif %}
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">👤 {{ _("web.pay.user") }}</h2>
+    {% if puser %}
+    <table class="kv">
+      <tr><th>Telegram</th><td class="mono">{{ puser.telegram_id }}</td></tr>
+      <tr><th>{{ _("web.pay.username") }}</th><td>{{ puser.username or "—" }}</td></tr>
+      <tr><th>{{ _("web.pay.name") }}</th><td>{{ puser.first_name or "" }} {{ puser.last_name or "" }}</td></tr>
+      <tr><th>{{ _("web.pay.balance") }}</th><td>{{ "{:,}".format(puser.wallet_balance or 0) }}</td></tr>
+    </table>
+    {% else %}<p class="muted">—</p>{% endif %}
+
+    {% if payment.receipt_path %}
+    <h2 class="panel-title" style="margin-top:1rem">🧾 {{ _("web.pay.receipt") }}</h2>
+    <p class="muted small">{{ payment.receipt_original_name or "" }} · {{ payment.receipt_mime_type or "" }}</p>
+    {% if payment.order_id %}
+    <a class="btn small" href="/admin/orders/{{ payment.order_id }}/receipt">{{ _("web.pay.open_receipt") }}</a>
+    {% endif %}
+    {% endif %}
+  </section>
+</div>
+
+{% if payment.status == "receipt_submitted" and can_process %}
+<section class="panel">
+  <h2 class="panel-title">⚖️ {{ _("web.pay.review") }}</h2>
+  <div class="action-row">
+    <form method="post" action="/admin/payments/{{ payment.id }}/approve">
+      <button type="submit" class="btn success">✅ {{ _("web.pay.approve") }}</button>
+    </form>
+  </div>
+  <form method="post" action="/admin/payments/{{ payment.id }}/reject" class="inline-form" style="margin-top:.75rem">
+    <input type="text" name="reason" required placeholder="{{ _('web.pay.reject_reason_ph') }}" style="max-width:340px">
+    <button type="submit" class="btn danger">❌ {{ _("web.pay.reject") }}</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
