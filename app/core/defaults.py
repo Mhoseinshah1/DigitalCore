@@ -181,6 +181,95 @@ DEFAULTS: list[SettingDef] = [
                description="Permit admin wallet debits to push a balance below zero.",
                label_fa="اجازه موجودی منفی کیف پول",
                description_fa="اجازه بدهی که موجودی کیف پول را زیر صفر ببرد."),
+
+    # ------------------------------------------------------------------
+    # Payment Core (invoice / manual receipt / cleanup / financial logs)
+    # ------------------------------------------------------------------
+    SettingDef("invoice_template_product", "texts", "text",
+               default=("🧾 پیش‌فاکتور شما:\n"
+                        "👤 نام کاربری: {username}\n"
+                        "🌿 نام سرویس: {name_product}\n"
+                        "⏳ مدت اعتبار: {Service_time} روز\n"
+                        "💵 قیمت: {price} تومان\n"
+                        "👥 حجم اکانت: {Volume}\n"
+                        "📝 یادداشت محصول: {note}\n"
+                        "💵 موجودی کیف پول شما: {userBalance}\n\n"
+                        "💰 سفارش شما آماده پرداخت است."),
+               label="Product pre-invoice template",
+               description="Bot pre-invoice text; supports {username} {name_product} "
+                           "{Service_time} {price} {Volume} {note} {userBalance} …",
+               label_fa="قالب پیش‌فاکتور محصول",
+               description_fa="متن پیش‌فاکتور ربات؛ متغیرها: {username} {name_product} "
+                              "{Service_time} {price} {Volume} {note} {userBalance} و …"),
+    SettingDef("invoice_template_wallet_topup", "texts", "text",
+               default=("🧾 فاکتور شارژ کیف پول:\n"
+                        "👤 نام کاربری: {username}\n"
+                        "💵 مبلغ شارژ: {price} تومان\n"
+                        "💰 موجودی فعلی: {userBalance}\n\n"
+                        "برای پرداخت یکی از روش‌های زیر را انتخاب کنید."),
+               label="Wallet top-up invoice template",
+               description="Bot wallet top-up invoice text (same variables).",
+               label_fa="قالب فاکتور شارژ کیف پول",
+               description_fa="متن فاکتور شارژ کیف پول (همان متغیرها)."),
+    SettingDef("manual_receipt_text", "texts", "text",
+               default=("برای پرداخت، مبلغ {price} تومان را به شماره کارت زیر واریز کنید 👇\n\n"
+                        "====================\n"
+                        "{card_number}\n"
+                        "{name_card}\n"
+                        "====================\n\n"
+                        "سپس روی «پرداخت کردم» بزنید و تصویر یا PDF رسید را ارسال کنید."),
+               label="Manual receipt instructions",
+               description="Card-to-card text; supports {price} {card_number} {name_card} "
+                           "{tracking_code} …",
+               label_fa="متن پرداخت کارت‌به‌کارت",
+               description_fa="متن راهنمای کارت‌به‌کارت؛ متغیرها: {price} {card_number} "
+                              "{name_card} {tracking_code} و …"),
+    SettingDef("custom_gateway_enabled", "payment", "bool", default="false",
+               label="Custom gateway enabled",
+               description="Show the custom-gateway payment button (provider wired in a "
+                           "later phase).",
+               label_fa="فعال‌بودن درگاه سفارشی",
+               description_fa="نمایش دکمهٔ درگاه سفارشی (اتصال واقعی در فاز بعد)."),
+    SettingDef("payment_cleanup_unpaid_invoice_days", "payment", "int", default="5",
+               label="Expire unpaid invoices after (days)",
+               description="Unpaid invoices older than this are marked expired.",
+               label_fa="انقضای فاکتورهای پرداخت‌نشده (روز)",
+               description_fa="فاکتورهای پرداخت‌نشده قدیمی‌تر از این مدت منقضی می‌شوند."),
+    SettingDef("payment_cleanup_pending_payment_days", "payment", "int", default="1",
+               label="Expire pending payments after (days)",
+               description="Pending payments (no receipt) older than this are expired.",
+               label_fa="انقضای پرداخت‌های ناتمام (روز)",
+               description_fa="پرداخت‌های ناتمام قدیمی‌تر از این مدت منقضی می‌شوند."),
+    SettingDef("financial_log_chat_id", "telegram", "string", default="",
+               label="Financial log chat id",
+               description="Telegram chat that receives payment/receipt events.",
+               label_fa="شناسه چت لاگ مالی",
+               description_fa="چتی که رویدادهای پرداخت/رسید به آن ارسال می‌شود."),
+    SettingDef("financial_log_topic_id", "telegram", "string", default="",
+               label="Financial log topic id",
+               description="Optional forum topic id inside the financial log chat.",
+               label_fa="شناسه تاپیک لاگ مالی",
+               description_fa="شناسه تاپیک (اختیاری) در چت لاگ مالی."),
+    SettingDef("purchase_log_chat_id", "telegram", "string", default="",
+               label="Purchase log chat id",
+               description="Telegram chat that receives successful-purchase events.",
+               label_fa="شناسه چت لاگ خرید",
+               description_fa="چتی که رویدادهای خرید موفق به آن ارسال می‌شود."),
+    SettingDef("purchase_log_topic_id", "telegram", "string", default="",
+               label="Purchase log topic id",
+               description="Optional forum topic id inside the purchase log chat.",
+               label_fa="شناسه تاپیک لاگ خرید",
+               description_fa="شناسه تاپیک (اختیاری) در چت لاگ خرید."),
+    SettingDef("general_log_chat_id", "telegram", "string", default="",
+               label="General log chat id",
+               description="Telegram chat that receives general system events (cleanup …).",
+               label_fa="شناسه چت لاگ عمومی",
+               description_fa="چتی که رویدادهای عمومی سیستم (پاکسازی و …) به آن ارسال می‌شود."),
+    SettingDef("general_log_topic_id", "telegram", "string", default="",
+               label="General log topic id",
+               description="Optional forum topic id inside the general log chat.",
+               label_fa="شناسه تاپیک لاگ عمومی",
+               description_fa="شناسه تاپیک (اختیاری) در چت لاگ عمومی."),
     SettingDef("license_low_stock_threshold", "general", "int", default="5",
                label="License low-stock threshold",
                description="Warn when a license product's available stock falls below this.",

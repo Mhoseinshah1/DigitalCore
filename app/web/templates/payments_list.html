@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
+{% block title %}{% if pending_only %}{{ _("web.pay.pending_title") }}{% else %}{{ _("web.pay.title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>{% if pending_only %}{{ _("web.pay.pending_title") }}{% else %}{{ _("web.pay.title") }}{% endif %}</h1>
+    <p class="muted">{{ _("web.pay.subtitle") }}</p>
+  </div>
+  <div class="page-actions">
+    {% if not pending_only %}<a class="btn" href="/admin/payments/pending">🧾 {{ _("web.pay.pending_title") }}</a>{% endif %}
+    <a class="btn" href="/admin/payments">{{ _("web.pay.all") }}</a>
+  </div>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.pay.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.pay.error", error=error) }}</div>{% endif %}
+
+{% if not payments %}
+<section class="panel">{{ empty_state(_("web.pay.empty"), icon="💳") }}</section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>{{ _("web.pay.col.tracking") }}</th>
+          <th>{{ _("web.pay.col.type") }}</th>
+          <th>{{ _("web.pay.col.method") }}</th>
+          <th>{{ _("web.pay.col.amount") }}</th>
+          <th>{{ _("web.pay.col.status") }}</th>
+          <th>{{ _("web.pay.col.submitted") }}</th>
+          <th>{{ _("web.pay.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in payments %}
+        <tr>
+          <td class="muted">{{ p.id }}</td>
+          <td class="mono">{{ p.tracking_code or "—" }}</td>
+          <td>{{ _("web.pay.type." ~ p.payment_type) }}</td>
+          <td>{{ p.method }}</td>
+          <td>{{ "{:,}".format(p.amount) }}</td>
+          <td>
+            {% set tone = {"approved": "ok", "receipt_submitted": "warn", "pending": "muted",
+                           "rejected": "danger", "failed": "danger", "expired": "muted",
+                           "cancelled": "muted"}.get(p.status, "muted") %}
+            <span class="pill {{ tone }}">{{ _("web.pay.status." ~ p.status) }}</span>
+          </td>
+          <td class="muted small">{% if p.submitted_at %}{{ p.submitted_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</td>
+          <td class="actions">
+            {# Pending-receipt actions, RTL order per spec: حذف · جزئیات · رد · تایید #}
+            {% if pending_only and can_process %}
+            <button class="btn small" disabled title="{{ _('web.pay.later') }}">🗑 {{ _("web.pay.delete") }}</button>
+            {% endif %}
+            <a class="btn small" href="/admin/payments/{{ p.id }}">📝 {{ _("web.pay.details") }}</a>
+            {% if p.status == "receipt_submitted" and can_process %}
+            <form method="post" action="/admin/payments/{{ p.id }}/reject" style="display:inline">
+              <input type="hidden" name="reason" value="{{ _('web.pay.reject_default_reason') }}">
+              <button type="submit" class="btn small danger">❌ {{ _("web.pay.reject") }}</button>
+            </form>
+            <form method="post" action="/admin/payments/{{ p.id }}/approve" style="display:inline">
+              <button type="submit" class="btn small success">✅ {{ _("web.pay.approve") }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

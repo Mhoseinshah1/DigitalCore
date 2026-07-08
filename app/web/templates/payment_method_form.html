@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}{% if method %}{{ _("web.paymethods.edit_title") }}{% else %}{{ _("web.paymethods.create_title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>{% if method %}{{ _("web.paymethods.edit_title") }}{% else %}{{ _("web.paymethods.create_title") }}{% endif %}</h1>
+    <p class="muted">{{ _("web.paymethods.subtitle") }}</p>
+  </div>
+</header>
+
+{% if error %}<div class="alert error">{{ _("web.pay.error", error=error) }}</div>{% endif %}
+
+<form method="post"
+      action="{% if method %}/admin/payment-methods/{{ method.id }}/edit{% else %}/admin/payment-methods/create{% endif %}"
+      class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="title">{{ _("web.paymethods.col.title") }} <span class="req-mark">*</span></label>
+        <input id="title" name="title" type="text" required value="{{ method.title if method else '' }}">
+      </div>
+      <div class="field">
+        <label for="code">{{ _("web.paymethods.col.code") }} <span class="req-mark">*</span></label>
+        <input id="code" name="code" type="text" required value="{{ method.code if method else '' }}">
+        <small class="muted">{{ _("web.paymethods.code_hint") }}</small>
+      </div>
+      <div class="field">
+        <label for="method_type">{{ _("web.paymethods.col.type") }}</label>
+        <select id="method_type" name="method_type">
+          {% for t in method_types %}
+          <option value="{{ t }}" {% if method and method.method_type == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sort_order">{{ _("web.paymethods.sort") }}</label>
+        <input id="sort_order" name="sort_order" type="number" value="{{ method.sort_order if method else 0 }}">
+      </div>
+      <div class="field">
+        <label for="min_amount">{{ _("web.paymethods.min") }}</label>
+        <input id="min_amount" name="min_amount" type="number" min="0"
+               value="{{ method.min_amount or '' if method else '' }}">
+      </div>
+      <div class="field">
+        <label for="max_amount">{{ _("web.paymethods.max") }}</label>
+        <input id="max_amount" name="max_amount" type="number" min="0"
+               value="{{ method.max_amount or '' if method else '' }}">
+      </div>
+      <div class="field">
+        <label for="cashback_percent">{{ _("web.paymethods.col.cashback") }}</label>
+        <input id="cashback_percent" name="cashback_percent" type="number" step="0.5" min="0" max="100"
+               value="{{ method.cashback_percent if method else 0 }}">
+      </div>
+      <div class="field">
+        <label for="activate_after_payments">{{ _("web.paymethods.after_payments") }}</label>
+        <input id="activate_after_payments" name="activate_after_payments" type="number" min="0"
+               value="{{ method.activate_after_payments if method else 0 }}">
+        <small class="muted">{{ _("web.paymethods.after_payments_hint") }}</small>
+      </div>
+      <div class="field field-text">
+        <label for="instruction_text">{{ _("web.paymethods.instructions") }}</label>
+        <textarea id="instruction_text" name="instruction_text" rows="3">{{ method.instruction_text or '' if method else '' }}</textarea>
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="is_active" {% if not method or method.is_active %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.paymethods.col.active") }}</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">🔐 {{ _("web.paymethods.gateway_section") }}</h2>
+    <div class="fields">
+      <div class="field">
+        <label for="api_url">API URL</label>
+        <input id="api_url" name="api_url" type="text" autocomplete="off"
+               value="{{ method.api_url or '' if method else '' }}">
+      </div>
+      <div class="field">
+        <label for="api_token">
+          API Token
+          {% if method and method.api_token_encrypted %}<span class="badge ok">{{ _("web.paymethods.configured") }}</span>{% endif %}
+        </label>
+        <input id="api_token" name="api_token" type="password" autocomplete="new-password"
+               placeholder="{{ _('web.paymethods.secret_keep') }}">
+      </div>
+      <div class="field">
+        <label for="merchant_id">
+          Merchant ID
+          {% if method and method.merchant_id_encrypted %}<span class="badge ok">{{ _("web.paymethods.configured") }}</span>{% endif %}
+        </label>
+        <input id="merchant_id" name="merchant_id" type="password" autocomplete="new-password"
+               placeholder="{{ _('web.paymethods.secret_keep') }}">
+      </div>
+    </div>
+    <p class="muted small">{{ _("web.paymethods.secret_note") }}</p>
+  </section>
+
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.paymethods.save") }}</button>
+    <a class="btn" href="/admin/payment-methods">{{ _("web.paymethods.cancel") }}</a>
+  </div>
+</form>
+{% endblock %}

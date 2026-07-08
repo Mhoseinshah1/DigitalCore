@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
+{% block title %}{{ _("web.paymethods.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>{{ _("web.paymethods.title") }}</h1>
+    <p class="muted">{{ _("web.paymethods.subtitle") }}</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn primary" href="/admin/payment-methods/create">➕ {{ _("web.paymethods.add") }}</a>
+  </div>
+</header>
+
+{% if saved %}<div class="alert ok">{{ _("web.pay.saved") }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ _("web.pay.error", error=error) }}</div>{% endif %}
+
+{% if not methods %}
+<section class="panel">{{ empty_state(_("web.paymethods.empty"), icon="🧩") }}</section>
+{% else %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ _("web.paymethods.col.title") }}</th>
+          <th>{{ _("web.paymethods.col.code") }}</th>
+          <th>{{ _("web.paymethods.col.type") }}</th>
+          <th>{{ _("web.paymethods.col.limits") }}</th>
+          <th>{{ _("web.paymethods.col.cashback") }}</th>
+          <th>{{ _("web.paymethods.col.active") }}</th>
+          <th>{{ _("web.paymethods.col.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in methods %}
+        <tr>
+          <td>{{ m.title }}</td>
+          <td class="mono">{{ m.code }}</td>
+          <td>{{ m.method_type }}</td>
+          <td class="muted small">
+            {% if m.min_amount %}{{ "{:,}".format(m.min_amount) }}{% else %}—{% endif %}
+            /
+            {% if m.max_amount %}{{ "{:,}".format(m.max_amount) }}{% else %}—{% endif %}
+          </td>
+          <td>{{ m.cashback_percent }}٪</td>
+          <td>
+            {% if m.is_active %}<span class="pill ok">{{ _("web.paymethods.on") }}</span>
+            {% else %}<span class="pill muted">{{ _("web.paymethods.off") }}</span>{% endif %}
+          </td>
+          <td class="actions">
+            <a class="btn small" href="/admin/payment-methods/{{ m.id }}/edit">{{ _("web.paymethods.edit") }}</a>
+            <form method="post" action="/admin/payment-methods/{{ m.id }}/toggle-active">
+              <button type="submit" class="btn small">{{ _("web.paymethods.toggle") }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

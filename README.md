@@ -222,6 +222,28 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   timeout, a rich **connection test** (auth + server status + inbounds), robust
   **inbound sync** that upserts and never deletes, and a **dry-run product
   validator**. See **Sanaei 3X-UI integration** below.
+- **Payment Core (slice 1) — done.** A clean, extensible invoice/payment layer
+  on top of the proven order/wallet flows: **Invoice** (unique `invoice_number`
+  + tracking code; unpaid/paid/expired/cancelled) and admin-managed
+  **PaymentMethod** rows (wallet + card-to-card active; custom/online gateway,
+  crypto, Telegram Stars seeded disabled — credentials stored encrypted, never
+  displayed). Every payment gets a unique **`PAY-…` tracking code**. The bot's
+  card flow shows the admin-configurable `manual_receipt_text` template with
+  copy-amount / copy-card / «پرداخت کردم» buttons and confirms receipts with
+  the tracking code; approvals stay idempotent and run delivery exactly once.
+  Admin web gains **/admin/payments**, **رسیدهای تایید نشده**
+  (/admin/payments/pending), a payment detail page with approve/reject
+  (reason required), and **/admin/payment-methods** CRUD. Best-effort
+  **financial/purchase/general Telegram logs** (configurable chat + topic ids)
+  and an hourly **cleanup sweep** that expires stale unpaid invoices/pending
+  payments with a Persian summary. Templates render through a safe
+  `{variable}` renderer (no eval; unknown variables stay visible) supporting
+  `{username} {name_product} {Service_time} {price} {Volume} {note}
+  {userBalance} {card_number} {name_card} {tracking_code}` and more.
+  **Not in this slice:** real online/custom gateway providers (interface +
+  encrypted credential storage are ready), and the invoice-template rendering
+  of the product pre-invoice screen (the card/receipt texts are template-driven
+  now; the pre-invoice body switches over in the next pass).
 - **Admin panel UI redesign — done.** A UI/UX-only pass over the server-rendered
   admin panel (no business logic touched): a single token-driven design system in
   `app/web/static/css/admin-theme.css` (premium, **RTL-first**, Persian-friendly,

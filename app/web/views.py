@@ -55,6 +55,7 @@ from app.services import (
     export_service,
     license_service,
     order_service,
+    payment_core_service,
     payment_service,
     product_category_service,
     product_service,
@@ -268,6 +269,12 @@ NAV_TREE: list[dict] = [
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
+        {"label_key": "nav.payments.all", "icon": "💳", "href": "/admin/payments",
+         "permission": "view_payments"},
+        {"label_key": "nav.payments.pending", "icon": "🧾", "href": "/admin/payments/pending",
+         "permission": "view_payments"},
+        {"label_key": "nav.payments.methods", "icon": "🧩", "href": "/admin/payment-methods",
+         "permission": "manage_payments"},
         {"label_key": "nav.payments.wallet", "icon": "📊", "href": "/admin/payments/wallet",
          "permission": "view_payments", "placeholder": True},
         {"label_key": "nav.payments.receipts", "icon": "🧾", "href": "/admin/payments/receipts",
@@ -4330,3 +4337,292 @@ async def maintenance_system_info(
     }
     ctx = _maint_ctx(request, admin, info=info)
     return render_template("system_info.html", ctx)
+
+
+# --------------------------------------------------------------------------
+# Payment Core: payments + payment methods (view_payments / process_payments /
+# manage_payments). Secrets (gateway tokens) are write-only — never rendered.
+# --------------------------------------------------------------------------
+def _payment_ctx_flags(role) -> dict:
+    return {
+        "can_process": has_permission(role, "process_payments"),
+        "can_manage_methods": has_permission(role, "manage_payments"),
+    }
+
+
+@router.get("/payments/pending", response_class=HTMLResponse)
+async def payments_pending_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    payments = await payment_core_service.list_payments(
+        session, status="receipt_submitted", limit=100)
+    return render_template(
+        "payments_list.html",
+        _ctx(request, admin, payments=payments, pending_only=True,
+             status_filter="receipt_submitted", saved="", error="",
+             **_payment_ctx_flags(admin.role)),
+    )
+
+
+@router.get("/payments", response_class=HTMLResponse)
+async def payments_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    status: str = "",
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    payments = await payment_core_service.list_payments(
+        session, status=(status or None), limit=100)
+    return render_template(
+        "payments_list.html",
+        _ctx(request, admin, payments=payments, pending_only=False,
+             status_filter=status, saved=saved, error=error,
+             **_payment_ctx_flags(admin.role)),
+    )
+
+
+@router.get("/payments/{payment_id}", response_class=HTMLResponse)
+async def payment_detail_page(
+    payment_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "view_payments")
+    if deny:
+        return deny
+    payment = await payment_core_service.get_payment(session, payment_id)
+    if payment is None:
+        return RedirectResponse("/admin/payments", status_code=302)
+    invoice = (await payment_core_service.get_invoice(session, payment.invoice_id)
+               if payment.invoice_id else None)
+    order = (await order_service.get_order(session, payment.order_id)
+             if payment.order_id else None)
+    from app.models.user import User
+    user = await session.get(User, payment.user_id)
+    return render_template(
+        "payment_detail.html",
+        _ctx(request, admin, payment=payment, invoice=invoice, order=order,
+             puser=user, saved=saved, error=error,
+             **_payment_ctx_flags(admin.role)),
+    )
+
+
+@router.post("/payments/{payment_id}/approve")
+async def payment_approve_submit(
+    payment_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "process_payments")
+    if deny:
+        return deny
+    try:
+        await payment_core_service.approve_payment(session, payment_id, admin.id)
+    except (payment_core_service.PaymentCoreError,
+            payment_service.ReceiptError, wallet_service.WalletError) as exc:
+        return RedirectResponse(
+            f"/admin/payments/{payment_id}?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/admin/payments/{payment_id}?saved=1", status_code=303)
+
+
+@router.post("/payments/{payment_id}/reject")
+async def payment_reject_submit(
+    payment_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "process_payments")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    reason = str(form.get("reason", "")).strip()
+    try:
+        await payment_core_service.reject_payment(session, payment_id, admin.id, reason)
+    except (payment_core_service.PaymentCoreError,
+            payment_service.ReceiptError) as exc:
+        return RedirectResponse(
+            f"/admin/payments/{payment_id}?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/admin/payments/{payment_id}?saved=1", status_code=303)
+
+
+def _method_form_values(form: dict) -> dict:
+    def _int_or_none(key):
+        raw = str(form.get(key, "")).strip()
+        return int(raw) if raw.isdigit() and int(raw) > 0 else None
+    return {
+        "code": str(form.get("code", "")).strip(),
+        "title": str(form.get("title", "")).strip(),
+        "method_type": str(form.get("method_type", "manual_receipt")).strip(),
+        "is_active": "is_active" in form,
+        "sort_order": int(str(form.get("sort_order", "0")).strip() or 0),
+        "min_amount": _int_or_none("min_amount"),
+        "max_amount": _int_or_none("max_amount"),
+        "cashback_percent": float(str(form.get("cashback_percent", "0")).strip() or 0),
+        "activate_after_payments": int(
+            str(form.get("activate_after_payments", "0")).strip() or 0),
+        "api_url": str(form.get("api_url", "")).strip() or None,
+        "instruction_text": str(form.get("instruction_text", "")).strip() or None,
+        # write-only secrets (blank = keep existing)
+        "api_token": str(form.get("api_token", "")).strip() or None,
+        "merchant_id": str(form.get("merchant_id", "")).strip() or None,
+    }
+
+
+@router.get("/payment-methods", response_class=HTMLResponse)
+async def payment_methods_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    methods = await payment_core_service.list_methods(session)
+    return render_template(
+        "payment_methods.html",
+        _ctx(request, admin, methods=methods, saved=saved, error=error),
+    )
+
+
+@router.get("/payment-methods/create", response_class=HTMLResponse)
+async def payment_method_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    from app.models.payment_method import PAYMENT_METHOD_TYPES
+    return render_template(
+        "payment_method_form.html",
+        _ctx(request, admin, method=None, method_types=PAYMENT_METHOD_TYPES, error=""),
+    )
+
+
+def _apply_method_values(method, values: dict) -> None:
+    from app.core import crypto
+    for field in ("code", "title", "method_type", "is_active", "sort_order",
+                  "min_amount", "max_amount", "cashback_percent",
+                  "activate_after_payments", "api_url", "instruction_text"):
+        setattr(method, field, values[field])
+    # Secrets: encrypt on write; blank keeps the stored ciphertext.
+    if values.get("api_token"):
+        method.api_token_encrypted = crypto.encrypt(values["api_token"])
+    if values.get("merchant_id"):
+        method.merchant_id_encrypted = crypto.encrypt(values["merchant_id"])
+
+
+@router.post("/payment-methods/create")
+async def payment_method_create_submit(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    from app.models.payment_method import PaymentMethod
+    values = _method_form_values(dict(await request.form()))
+    if not values["code"] or not values["title"]:
+        return RedirectResponse(
+            "/admin/payment-methods?error=code+and+title+required", status_code=303)
+    if await payment_core_service.get_method_by_code(session, values["code"]):
+        return RedirectResponse(
+            "/admin/payment-methods?error=duplicate+code", status_code=303)
+    method = PaymentMethod()
+    _apply_method_values(method, values)
+    session.add(method)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="payment_method_created",
+        target_type="payment_method", target_id=None, new=f"code={values['code']}",
+    )
+    await session.commit()
+    return RedirectResponse("/admin/payment-methods?saved=1", status_code=303)
+
+
+@router.get("/payment-methods/{method_id}/edit", response_class=HTMLResponse)
+async def payment_method_edit_page(
+    method_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    from app.models.payment_method import PAYMENT_METHOD_TYPES, PaymentMethod
+    method = await session.get(PaymentMethod, method_id)
+    if method is None:
+        return RedirectResponse("/admin/payment-methods", status_code=302)
+    return render_template(
+        "payment_method_form.html",
+        _ctx(request, admin, method=method, method_types=PAYMENT_METHOD_TYPES, error=""),
+    )
+
+
+@router.post("/payment-methods/{method_id}/edit")
+async def payment_method_edit_submit(
+    method_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    from app.models.payment_method import PaymentMethod
+    method = await session.get(PaymentMethod, method_id)
+    if method is None:
+        return RedirectResponse("/admin/payment-methods", status_code=302)
+    values = _method_form_values(dict(await request.form()))
+    existing = await payment_core_service.get_method_by_code(session, values["code"])
+    if existing is not None and existing.id != method.id:
+        return RedirectResponse(
+            "/admin/payment-methods?error=duplicate+code", status_code=303)
+    _apply_method_values(method, values)
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action="payment_method_updated",
+        target_type="payment_method", target_id=method.id, new=f"code={method.code}",
+    )
+    await session.commit()
+    return RedirectResponse("/admin/payment-methods?saved=1", status_code=303)
+
+
+@router.post("/payment-methods/{method_id}/toggle-active")
+async def payment_method_toggle_active(
+    method_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_payments")
+    if deny:
+        return deny
+    from app.models.payment_method import PaymentMethod
+    method = await session.get(PaymentMethod, method_id)
+    if method is not None:
+        method.is_active = not method.is_active
+        await audit_service.log(
+            session, actor_type="admin", actor_id=admin.id,
+            action="payment_method_toggled", target_type="payment_method",
+            target_id=method.id, new=f"active={method.is_active}",
+        )
+        await session.commit()
+    return RedirectResponse("/admin/payment-methods?saved=1", status_code=303)

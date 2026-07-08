@@ -182,13 +182,55 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
         await payment_service.create_payment_for_order(session, order)
         await session.commit()
         product = await product_service.get(session, product_id)
-        lines = _payment_instruction_lines(order, product, cfg, _)
+
+        # Payment Core: mint the invoice + unique tracking code for this order.
+        from app.services import payment_core_service
+        from app.services.template_render_service import format_toman, render_text_template
+        invoice = await payment_core_service.create_product_invoice(
+            session, user, product, order=order)
+        payment = await payment_service.get_payment_by_order(session, order.id)
+        if payment is not None:
+            payment.invoice_id = invoice.id
+            payment.payment_type = invoice.invoice_type
+            if not payment.tracking_code:
+                payment.tracking_code = payment_core_service.generate_tracking_code("PAY")
+        await session.commit()
+        tracking_code = payment.tracking_code if payment is not None else ""
+
+        # Admin-configurable card text (falls back to the legacy built-in lines).
+        template = (await svc.get_str("manual_receipt_text", "")).strip()
+        if template:
+            text = render_text_template(template, {
+                "price": format_toman(order.final_amount),
+                "card_number": cfg["card_number"],
+                "name_card": cfg.get("card_owner") or "",
+                "tracking_code": tracking_code,
+                "invoice_number": invoice.invoice_number,
+                "order_number": order.order_number,
+                "username": tg_user.username or (tg_user.first_name or ""),
+            })
+            lines = [text, "", _("purchase.tracking_code", code=tracking_code)]
+        else:
+            lines = _payment_instruction_lines(order, product, cfg, _)
+            if tracking_code:
+                lines += ["", _("purchase.tracking_code", code=tracking_code)]
+        card_number = cfg["card_number"]
+        final_amount = int(order.final_amount or 0)
         order_id = order.id
 
     await state.set_state(PurchaseStates.waiting_for_receipt)
-    await state.update_data(order_id=order_id)
+    await state.update_data(order_id=order_id, card_number=card_number,
+                            pay_amount=final_amount)
     if reply is not None:
-        await reply.answer("\n".join(lines), parse_mode="HTML")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("purchase.btn.copy_amount"),
+                                  callback_data="paycpa"),
+             InlineKeyboardButton(text=_("purchase.btn.copy_card"),
+                                  callback_data="paycpc")],
+            [InlineKeyboardButton(text=_("purchase.btn.paid"),
+                                  callback_data="paydone")],
+        ])
+        await reply.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
 
 
 def _topup_button(_: Callable[..., str]) -> InlineKeyboardMarkup:
@@ -727,6 +769,22 @@ async def _handle_receipt(
 
     await state.clear()
     await message.answer(_("purchase.receipt_saved"))
+    if payment.tracking_code:
+        await message.answer(_(
+            "purchase.receipt_waiting",
+            amount=f"{payment.amount:,}", code=payment.tracking_code,
+        ))
+    # Best-effort financial log (never blocks the flow).
+    try:
+        from app.services import financial_log_service
+        async with SessionLocal() as session:
+            await financial_log_service.log_receipt_submitted(
+                session, bot, tracking_code=payment.tracking_code or "-",
+                amount=int(payment.amount or 0),
+                user_label=f"@{tg_user.username}" if tg_user.username else str(tg_user.id),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("financial log failed: %s", exc)
 
     # Best-effort admin notification (never breaks the user's flow).
     try:
@@ -1098,4 +1156,36 @@ async def on_list_close(
             await callback.message.delete()
         except Exception:  # noqa: BLE001 - deleting an old message may fail
             pass
+    await callback.answer()
+
+
+# --------------------------------------------------------------------------
+# Payment Core: card-flow helper buttons. Telegram can't put text on the
+# clipboard from an ordinary inline button, so "copy" answers with the value
+# in a popup the user can long-press-copy from.
+# --------------------------------------------------------------------------
+@router.callback_query(F.data == "paycpa")
+async def on_copy_amount(callback: CallbackQuery, _: Callable[..., str],
+                         state: FSMContext) -> None:
+    data = await state.get_data()
+    amount = int(data.get("pay_amount") or 0)
+    await callback.answer(_("purchase.copy_amount_popup", amount=f"{amount:,}"),
+                          show_alert=True)
+
+
+@router.callback_query(F.data == "paycpc")
+async def on_copy_card(callback: CallbackQuery, _: Callable[..., str],
+                       state: FSMContext) -> None:
+    data = await state.get_data()
+    card = str(data.get("card_number") or "")
+    await callback.answer(_("purchase.copy_card_popup", card=card), show_alert=True)
+
+
+@router.callback_query(F.data == "paydone")
+async def on_paid_pressed(callback: CallbackQuery, _: Callable[..., str],
+                          state: FSMContext) -> None:
+    """«پرداخت کردم» — the receipt state is already armed; prompt for the file."""
+    await state.set_state(PurchaseStates.waiting_for_receipt)
+    if callback.message is not None:
+        await callback.message.answer(_("purchase.send_receipt_now"))
     await callback.answer()
