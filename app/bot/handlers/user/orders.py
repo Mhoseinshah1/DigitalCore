@@ -24,7 +24,7 @@ from aiogram.types import (
 from app.core.settings_service import SettingsService
 from app.core.statuses import order_status_label
 from app.database import SessionLocal
-from app.i18n import t, texts_for
+from app.i18n import menu_texts, t
 from app.services import (
     coupon_service,
     license_service,
@@ -68,7 +68,7 @@ for _key in ("btn.products", "btn.account", "btn.support", "btn.rules",
              "btn.language", "btn.admin_panel", "btn.my_orders", "btn.my_licenses",
              "btn.my_services", "btn.wallet", "btn.tutorials", "btn.my_tickets",
              "btn.referral"):
-    _NAV_TEXTS |= texts_for(_key)
+    _NAV_TEXTS |= menu_texts(_key)
 
 
 def _order_error_text(exc: OrderError, _: Callable[..., str]) -> str:
@@ -627,7 +627,7 @@ async def on_action_pick(
 
 
 @router.message(Command("coupons"))
-@router.message(F.text.in_(texts_for("btn.coupons")))
+@router.message(F.text.in_(menu_texts("btn.coupons")))
 async def on_coupons(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
@@ -812,7 +812,7 @@ async def render_orders(reply, tg_user, _: Callable[..., str], lang: str) -> Non
 
 
 @router.message(Command("orders"))
-@router.message(F.text.in_(texts_for("btn.my_orders")))
+@router.message(F.text.in_(menu_texts("btn.my_orders")))
 async def on_orders(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
@@ -831,7 +831,7 @@ class LicenseButtonFilter(BaseFilter):
         text = (message.text or "").strip()
         if not text:
             return False
-        if text in texts_for("btn.my_licenses"):
+        if text in menu_texts("btn.my_licenses"):
             return True
         async with SessionLocal() as session:
             title = (await SettingsService(session)
@@ -867,7 +867,7 @@ async def render_my_licenses(reply, tg_user, _: Callable[..., str], lang: str) -
 
 
 @router.message(Command("my_licenses"))
-@router.message(F.text.in_(texts_for("btn.my_licenses")))
+@router.message(F.text.in_(menu_texts("btn.my_licenses")))
 @router.message(LicenseButtonFilter())
 async def on_my_licenses(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"

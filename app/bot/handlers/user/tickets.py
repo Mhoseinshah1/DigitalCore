@@ -24,7 +24,7 @@ from aiogram.types import (
 from app.bot.handlers.user.orders import _download_telegram_file, _extract_file
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import ticket_service, user_service
 from app.services.ticket_service import TicketAttachment, TicketError
 
@@ -44,7 +44,7 @@ _NAV_TEXTS: set[str] = set()
 for _key in ("btn.products", "btn.account", "btn.support", "btn.rules", "btn.language",
              "btn.admin_panel", "btn.my_orders", "btn.my_licenses", "btn.my_services",
              "btn.wallet", "btn.tutorials"):
-    _NAV_TEXTS |= texts_for(_key)
+    _NAV_TEXTS |= menu_texts(_key)
 
 
 class TicketStates(StatesGroup):
@@ -77,7 +77,7 @@ async def _show_support(message: Message, _: Callable[..., str]) -> None:
 
 
 @router.message(Command("support"))
-@router.message(F.text.in_(texts_for("btn.support")))
+@router.message(F.text.in_(menu_texts("btn.support")))
 async def on_support(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
@@ -182,7 +182,7 @@ async def _create_ticket(message: Message, _: Callable[..., str], state: FSMCont
 
 # --- list + open ------------------------------------------------------------
 @router.message(Command("tickets"))
-@router.message(F.text.in_(texts_for("btn.my_tickets")))
+@router.message(F.text.in_(menu_texts("btn.my_tickets")))
 async def on_my_tickets(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

@@ -16,6 +16,13 @@ wait_for_db() {
 case "$ROLE" in
     backend|web)
         wait_for_db
+        # Opt-in auto-migration: set AUTO_MIGRATE=true in the environment so a
+        # plain `docker compose up -d --build backend` also applies pending
+        # migrations. Default off keeps the historical explicit-migrate flow.
+        if [ "${AUTO_MIGRATE:-false}" = "true" ]; then
+            echo "==> AUTO_MIGRATE=true — applying database migrations…"
+            alembic upgrade head
+        fi
         echo "==> Starting backend API on ${API_HOST:-0.0.0.0}:${API_PORT:-8000}…"
         exec uvicorn app.web.main:app \
             --host "${API_HOST:-0.0.0.0}" \

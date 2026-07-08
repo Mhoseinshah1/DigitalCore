@@ -20,7 +20,7 @@ from aiogram.types import (
 from app.core.settings_service import SettingsService
 from app.core.statuses import wallet_tx_type_label
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import payment_service, user_service, wallet_service
 from app.services.wallet_service import WalletError
 
@@ -36,7 +36,7 @@ _NAV_TEXTS: set[str] = set()
 for _key in ("btn.products", "btn.account", "btn.support", "btn.rules", "btn.language",
              "btn.admin_panel", "btn.my_orders", "btn.my_licenses", "btn.my_services",
              "btn.wallet"):
-    _NAV_TEXTS |= texts_for(_key)
+    _NAV_TEXTS |= menu_texts(_key)
 
 
 class WalletStates(StatesGroup):
@@ -90,7 +90,7 @@ async def _show_wallet(message: Message, _: Callable[..., str]) -> None:
 
 
 @router.message(Command("wallet"))
-@router.message(F.text.in_(texts_for("btn.wallet")))
+@router.message(F.text.in_(menu_texts("btn.wallet")))
 async def on_wallet(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
@@ -98,7 +98,7 @@ async def on_wallet(
     await _show_wallet(message, _)
 
 
-@router.message(F.text.in_(texts_for("btn.wallet_history")))
+@router.message(F.text.in_(menu_texts("btn.wallet_history")))
 async def on_wallet_history_button(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
@@ -167,7 +167,7 @@ async def on_topup_cb(
         await _start_topup(callback.message, _, state)
 
 
-@router.message(F.text.in_(texts_for("btn.wallet_topup")))
+@router.message(F.text.in_(menu_texts("btn.wallet_topup")))
 async def on_topup_button(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

@@ -14,7 +14,7 @@ from aiogram.types import Message
 
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import referral_service, user_service
 
 log = logging.getLogger("bot.user.referral")
@@ -34,7 +34,7 @@ async def _bot_username(bot: Bot | None) -> str:
 
 
 @router.message(Command("referral"))
-@router.message(F.text.in_(texts_for("btn.referral")))
+@router.message(F.text.in_(menu_texts("btn.referral")))
 async def on_referral(
     message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
