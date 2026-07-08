@@ -380,11 +380,13 @@ def build_nav(role: object, lang: str, current_path: str) -> list[dict]:
 def _ctx(request: Request, admin: Admin | None, **extra: object) -> dict:
     lang = _resolve_lang(request)
     role = admin.role if admin is not None else None
+    from app.config import settings as _settings  # local: keep top imports light
     return {
         "request": request,
         "admin": admin,
         "nav": build_nav(role, lang, request.url.path),
         "version": __version__,
+        "app_env": getattr(_settings, "APP_ENV", "development"),
         "domain": request.url.hostname,
         "lang": lang,
         "rtl": is_rtl(lang),
@@ -550,6 +552,9 @@ async def dashboard(
             summary=summary,
             can_reports=has_permission(admin.role, "view_reports"),
             can_financial=has_permission(admin.role, "view_financial_reports"),
+            can_products=has_permission(admin.role, "manage_products"),
+            can_xui=has_permission(admin.role, "manage_xui"),
+            can_payments=has_permission(admin.role, "view_payments"),
         ),
     )
 

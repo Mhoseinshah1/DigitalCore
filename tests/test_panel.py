@@ -39,7 +39,7 @@ async def test_login_page_renders_en_ltr_with_cookie(client) -> None:
 
 
 async def test_static_css_served(client) -> None:
-    r = await client.get("/static/css/style.css")
+    r = await client.get("/static/css/admin-theme.css")
     assert r.status_code == 200
     assert "text/css" in r.headers["content-type"]
 

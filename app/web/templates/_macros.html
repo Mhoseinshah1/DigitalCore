@@ -1,0 +1,41 @@
+{# ------------------------------------------------------------------ #}
+{# Reusable UI macros for the admin panel. Import with:                #}
+{#   {% from "_macros.html" import badge, empty_state, stat_card %}    #}
+{# These are presentation-only helpers; they add no business logic.    #}
+{# ------------------------------------------------------------------ #}
+
+{# A status pill. `tone` is one of: ok, warn, error, danger, info,     #}
+{# muted, primary (defaults to muted). `label` is the visible text.    #}
+{% macro badge(label, tone="muted") -%}
+<span class="pill {{ tone }}">{{ label }}</span>
+{%- endmacro %}
+
+{# A friendly empty state. `action_href` / `action_label` are optional #}
+{# and render a primary button when both are provided.                 #}
+{% macro empty_state(message, icon="📭", title="", action_href="", action_label="") -%}
+<div class="empty-state">
+  <div class="empty-ico" aria-hidden="true">{{ icon }}</div>
+  {% if title %}<p class="empty-title">{{ title }}</p>{% endif %}
+  <p class="empty-msg">{{ message }}</p>
+  {% if action_href and action_label %}
+  <a class="btn primary" href="{{ action_href }}">{{ action_label }}</a>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{# A dashboard KPI card with a colored icon chip. `href` optional.     #}
+{% macro stat_card(value, label, icon="•", tone="", href="") -%}
+{% if href %}<a class="stat" href="{{ href }}">{% else %}<div class="stat">{% endif %}
+  <span class="stat-ico {{ tone }}">{{ icon }}</span>
+  <div class="stat-num">{{ value }}</div>
+  <div class="stat-label">{{ label }}</div>
+{% if href %}</a>{% else %}</div>{% endif %}
+{%- endmacro %}
+
+{# A quick-action tile linking to an existing route.                   #}
+{% macro quick_tile(href, label, icon="→") -%}
+<a class="quick-tile" href="{{ href }}">
+  <span class="qt-ico" aria-hidden="true">{{ icon }}</span>
+  <span class="qt-label">{{ label }}</span>
+</a>
+{%- endmacro %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 {% block title %}{{ _("web.wallet.topups.title") }}{% endblock %}
 {% block content %}
 <header class="page-head">
@@ -22,7 +23,7 @@
 {% endif %}
 
 {% if not rows %}
-<section class="note"><p class="muted">{{ _("web.wallet.topups.empty") }}</p></section>
+<section class="panel">{{ empty_state(_("web.wallet.topups.empty"), icon="👛") }}</section>
 {% else %}
 <section class="panel">
   <div class="table-wrap">
