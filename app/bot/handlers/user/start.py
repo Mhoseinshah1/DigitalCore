@@ -8,7 +8,6 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import Message
 
-from app.bot.handlers.user.language import language_picker_keyboard
 from app.bot.keyboards.user import user_main_menu
 from app.core.settings_service import SettingsService
 from app.i18n import t
@@ -60,11 +59,14 @@ async def on_start(
         start_text = await svc.get_str("start_text", "")
         rules_text = await svc.get_str("rules_text", "")
         license_title = (await svc.get_str("license_section_title", "")).strip()
-
-    if created:
-        # New user: pick a language first; the menu follows in that language.
-        await message.answer(_("lang.pick"), reply_markup=language_picker_keyboard())
-        return
+        # New users adopt the admin default language (no language question on /start).
+        if created:
+            try:
+                await user_service.set_language(
+                    session, tg_user.id, (await svc.get_str("bot_default_language", lang)).strip())
+                await session.commit()
+            except ValueError:
+                pass  # invalid default → keep the resolved language
 
     await message.answer(
         start_text or _("greeting"),

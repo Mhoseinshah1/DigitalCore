@@ -28,8 +28,14 @@ class LanguageMiddleware(BaseMiddleware):
             try:
                 async with SessionLocal() as session:
                     user = await user_service.get_by_telegram_id(session, tg_user.id)
-                if user is not None:
-                    lang = normalize_lang(user.language)
+                    if user is not None:
+                        lang = normalize_lang(user.language)
+                    else:
+                        # No user row yet (e.g. before /start): honour the admin default.
+                        from app.core.settings_service import SettingsService
+                        lang = normalize_lang(
+                            await SettingsService(session).get_str(
+                                "bot_default_language", DEFAULT_LANG))
             except Exception as exc:  # noqa: BLE001 - fall back to the default language
                 log.warning("Language lookup failed: %s", exc)
 

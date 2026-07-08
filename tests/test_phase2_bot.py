@@ -60,11 +60,13 @@ async def bot_db(monkeypatch):
         await engine.dispose()
 
 
-async def test_start_registers_new_user_and_captures_language(bot_db) -> None:
+async def test_start_registers_new_user_without_language_picker(bot_db) -> None:
+    # The bot no longer asks a language on /start — a new user goes straight to
+    # the welcome + menu (language follows the admin default, default fa).
     msg = FakeMessage(FakeUser(70001, username="neo", first_name="Neo", language_code="en"))
     await on_start(msg, FA, lang="fa", is_admin=False)
-    # New user gets the language picker.
-    assert msg.answers and msg.answers[0] == FA("lang.pick")
+    assert msg.answers and msg.answers[0] == FA("greeting")
+    assert FA("lang.pick") not in msg.answers
     async with bot_db() as s:
         user = await user_service.get_by_telegram_id(s, 70001)
     assert user is not None and user.language_code == "en"

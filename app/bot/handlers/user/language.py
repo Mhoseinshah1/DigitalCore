@@ -30,11 +30,20 @@ def language_picker_keyboard() -> InlineKeyboardMarkup:
 
 
 @router.message(Command("language"))
-@router.message(F.text.in_(menu_texts("btn.language")))
 async def on_language_command(
     message: Message, _: Callable[..., str], lang: str = "fa"
 ) -> None:
+    """The /language command still offers the picker (existing flow preserved)."""
     await message.answer(_("lang.pick"), reply_markup=language_picker_keyboard())
+
+
+@router.message(F.text.in_(menu_texts("btn.language")))
+async def on_language_button(
+    message: Message, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    """A cached «زبان / Language» reply button (removed from the menu) — explain that
+    the language is managed by the admin, and never leave the tap silently ignored."""
+    await message.answer(_("lang.managed_by_admin"))
 
 
 @router.callback_query(F.data.startswith(CB_PREFIX))

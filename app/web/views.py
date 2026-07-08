@@ -7,6 +7,7 @@ translator. Auth is a JWT session cookie (see app/web/deps.py).
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from urllib.parse import quote
@@ -100,6 +101,8 @@ def render_template(name: str, context: dict, status_code: int = 200):
 # Panel routes live under /admin; a couple of root redirects point here.
 router = APIRouter(prefix="/admin", include_in_schema=False)
 root_router = APIRouter(include_in_schema=False)
+
+log = logging.getLogger("web.views")
 
 LANG_COOKIE = "dc_lang"
 LOGIN_PATH = "/admin/login"
@@ -273,6 +276,8 @@ NAV_TREE: list[dict] = [
 
     {"label_key": "nav.bot", "icon": "🤖", "children": [
         {"label_key": "nav.bot.messages", "icon": "📝", "href": "/admin/settings/bot-texts",
+         "permission": "manage_settings"},
+        {"label_key": "nav.bot.notifications", "icon": "📢", "href": "/admin/notifications",
          "permission": "manage_settings"},
     ]},
 
@@ -526,8 +531,13 @@ async def dashboard(
     # Phase 11: a 30-day analytics snapshot powered by report_service. Revenue
     # is only surfaced to admins who may view financial reports; the operational
     # "needs attention" counters are safe for everyone with view_dashboard.
-    r_start, r_end = report_service.parse_date_range(preset="last_30_days")
-    summary = await report_service.get_dashboard_summary(session, r_start, r_end)
+    # Degrade gracefully: a report failure must never blank the dashboard.
+    try:
+        r_start, r_end = report_service.parse_date_range(preset="last_30_days")
+        summary = await report_service.get_dashboard_summary(session, r_start, r_end)
+    except Exception as exc:  # noqa: BLE001 - dashboard must still render
+        log.warning("dashboard summary failed, rendering without it: %s", exc)
+        summary = None
     return render_template(
         "dashboard.html",
         _ctx(
@@ -542,6 +552,26 @@ async def dashboard(
             can_financial=has_permission(admin.role, "view_financial_reports"),
         ),
     )
+
+
+@router.get("/dashboard")
+async def dashboard_alias():
+    """Both `/admin` and `/admin/dashboard` reach the dashboard (any bookmark/link works)."""
+    return RedirectResponse("/admin", status_code=302)
+
+
+# --------------------------------------------------------------------------
+# Notifications (اطلاع‌رسانی) — safe placeholder; mass broadcast is not built here.
+# --------------------------------------------------------------------------
+@router.get("/notifications", response_class=HTMLResponse)
+async def notifications_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+):
+    lang, deny = _guard(request, admin, "manage_settings")
+    if deny:
+        return deny
+    return render_template("notifications.html", _ctx(request, admin))
 
 
 # --------------------------------------------------------------------------
