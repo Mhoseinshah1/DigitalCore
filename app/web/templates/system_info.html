@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.maint.system_title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>ℹ️ {{ _("web.maint.system_title") }}</h1>
+  <p class="muted"><a href="/admin/maintenance">{{ _("web.maint.back") }}</a></p></header>
+<section class="panel">
+  <div class="status-rows">
+    <div class="status-row"><span>{{ _("web.maint.sys.version") }}</span><span>v{{ info.version }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.sys.env") }}</span><span>{{ info.app_env }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.sys.python") }}</span><span class="muted small">{{ info.python }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.sys.platform") }}</span><span class="muted small">{{ info.platform }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.sys.db") }}</span><span>{{ info.db_backend }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.sys.storage") }}</span><span class="muted small mono">{{ info.storage_root }}</span></div>
+  </div>
+  <p class="muted small">{{ _("web.maint.sys.note") }}</p>
+</section>
+{% endblock %}

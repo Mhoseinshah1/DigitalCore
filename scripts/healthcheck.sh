@@ -84,6 +84,50 @@ check_http() {
 check_http "/health" "$HEALTH_URL"
 check_http "/ready" "$READY_URL"
 
+# --- database connectivity ---------------------------------------------------
+PGUSER="$(env_get POSTGRES_USER digitalcore)"
+PGDB="$(env_get POSTGRES_DB digitalcore)"
+if container_running postgres; then
+    if "${COMPOSE[@]}" exec -T postgres pg_isready -U "$PGUSER" -d "$PGDB" >/dev/null 2>&1; then
+        ok "PostgreSQL accepts connections."
+    else
+        warn "PostgreSQL is not accepting connections."
+        failures=$((failures + 1))
+    fi
+fi
+
+# --- redis connectivity ------------------------------------------------------
+if container_running redis; then
+    if [ "$("${COMPOSE[@]}" exec -T redis redis-cli ping 2>/dev/null | tr -d '\r')" = "PONG" ]; then
+        ok "Redis responds to PING."
+    else
+        warn "Redis did not respond to PING."
+        failures=$((failures + 1))
+    fi
+fi
+
+# --- disk usage --------------------------------------------------------------
+info "Disk usage (repo filesystem):"
+df -h "$ROOT_DIR" | tail -n +1 >&2 || true
+BACKUP_DIR="$ROOT_DIR/storage/backups"
+if [ -d "$BACKUP_DIR" ]; then
+    bcount="$(find "$BACKUP_DIR" -type f \( -name '*.tar.gz' -o -name '*.sql.gz' -o -name '*.tar.gz.enc' \) 2>/dev/null | wc -l | tr -d ' ')"
+    bsize="$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1)"
+    ok "Backups: ${bcount} file(s), ${bsize:-0} under storage/backups."
+fi
+
+# --- recent errors in service logs (last 200 lines) --------------------------
+for service in backend bot worker; do
+    if container_running "$service"; then
+        n="$("${COMPOSE[@]}" logs --tail 200 "$service" 2>/dev/null | grep -ciE '\b(error|traceback|critical)\b' || true)"
+        if [ "${n:-0}" -gt 0 ]; then
+            warn "${service}: ${n} error-like line(s) in the last 200 log lines."
+        else
+            ok "${service}: no recent errors in the last 200 log lines."
+        fi
+    fi
+done
+
 # --- verdict -----------------------------------------------------------------
 if [ "$failures" -eq 0 ]; then
     printf '%s\n' "${GREEN}${BOLD}All healthy.${RESET}"

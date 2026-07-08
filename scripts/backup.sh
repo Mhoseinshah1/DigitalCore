@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
 # =============================================================================
-# DigitalCore — encrypted backup
+# DigitalCore — backup  (database | storage | full)
 # =============================================================================
-# Dumps the PostgreSQL database and bundles .env + storage/{receipts,exports,logs}
-# into a single AES-256 encrypted archive under storage/backups/.
+# Writes a backup under storage/backups/YYYY/MM/ matching the in-app
+# backup_service conventions, so the admin panel and list_backups.sh see the
+# same files:
+#     digitalcore-db-YYYYMMDD-HHMMSS.sql.gz      (database)
+#     digitalcore-storage-YYYYMMDD-HHMMSS.tar.gz (storage)
+#     digitalcore-full-YYYYMMDD-HHMMSS.tar.gz    (full: db + storage + metadata)
 #
-# The ONLY thing printed to stdout is the final backup path (last line), so other
-# scripts (update.sh) can capture it. All human messages go to stderr.
+# Each file is written mode 0600 with a matching .sha256 sidecar. The ONLY thing
+# printed to stdout is the final backup path (last line); all human messages go
+# to stderr, so callers (update.sh) can capture the path.
 #
-#   Env: BACKUP_KEEP (default 7)   — how many backups to retain.
+# Usage:
+#   ./scripts/backup.sh            # full (default)
+#   ./scripts/backup.sh database
+#   ./scripts/backup.sh storage
+#   ./scripts/backup.sh full
+#
+# No secrets are ever printed. The database password is never passed on a
+# command line; pg_dump runs inside the postgres container over its local
+# socket.
 # =============================================================================
 set -euo pipefail
 
-# --- messaging (to stderr; stdout is reserved for the result path) -----------
+# --- messaging (stderr; stdout is reserved for the result path) --------------
 if [ -t 2 ]; then
     RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
 else
@@ -23,6 +36,13 @@ ok()   { printf '%s\n' "${GREEN}✓${RESET} $*" >&2; }
 warn() { printf '%s\n' "${YELLOW}!${RESET} $*" >&2; }
 die()  { printf '%s\n' "${RED}✗ $*${RESET}" >&2; exit 1; }
 
+MODE="${1:-full}"
+case "$MODE" in
+    database|storage|full) ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    *) die "Unknown mode '$MODE'. Use: database | storage | full." ;;
+esac
+
 # --- locate repo root --------------------------------------------------------
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -30,93 +50,103 @@ ENV_FILE="$ROOT_DIR/.env"
 
 # --- read .env WITHOUT sourcing it -------------------------------------------
 env_get() {
-    # env_get KEY [default]
     local key="$1" default="${2:-}" line val
     [ -f "$ENV_FILE" ] || { printf '%s' "$default"; return; }
     line="$(grep -E "^${key}=" "$ENV_FILE" | head -n1 || true)"
     [ -n "$line" ] || { printf '%s' "$default"; return; }
-    val="${line#*=}"
-    val="${val%$'\r'}"
+    val="${line#*=}"; val="${val%$'\r'}"
     printf '%s' "$val"
 }
 
-# --- compose detection (as an array to stay quote-safe) ----------------------
 COMPOSE=()
 if docker compose version >/dev/null 2>&1; then
     COMPOSE=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE=(docker-compose)
-else
-    die "Docker Compose is not installed."
 fi
 
-# --- config ------------------------------------------------------------------
 PGUSER="$(env_get POSTGRES_USER digitalcore)"
 PGDB="$(env_get POSTGRES_DB digitalcore)"
-BACKUP_KEY="$(env_get BACKUP_ENCRYPTION_KEY)"
-BACKUP_KEEP="${BACKUP_KEEP:-7}"
-BACKUP_DIR="$ROOT_DIR/storage/backups"
 
-[ -n "$BACKUP_KEY" ] || die "BACKUP_ENCRYPTION_KEY is empty in .env — cannot create an encrypted backup."
-command -v openssl >/dev/null 2>&1 || die "openssl is not installed."
+STAMP="$(date -u +%Y%m%d-%H%M%S)"
+DEST_DIR="$ROOT_DIR/storage/backups/$(date -u +%Y)/$(date -u +%m)"
+mkdir -p "$DEST_DIR"
 
-mkdir -p "$BACKUP_DIR"
-
-# --- workspace (auto-cleaned) ------------------------------------------------
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-PAYLOAD="$TMP/payload"
-mkdir -p "$PAYLOAD/storage"
 
-# --- 1. database dump --------------------------------------------------------
-info "Dumping database '${PGDB}'…"
-if ! "${COMPOSE[@]}" exec -T postgres pg_dump -U "$PGUSER" -d "$PGDB" --clean --if-exists > "$PAYLOAD/db.sql"; then
-    die "pg_dump failed (is the postgres service running?)."
-fi
-ok "Database dumped ($(wc -c < "$PAYLOAD/db.sql") bytes)."
-
-# --- 2. collect .env + storage subdirs (skip missing) ------------------------
-if [ -f "$ROOT_DIR/.env" ]; then
-    cp -a "$ROOT_DIR/.env" "$PAYLOAD/.env"
-else
-    warn ".env not found — skipping it in the backup."
-fi
-for d in receipts exports logs; do
-    if [ -d "$ROOT_DIR/storage/$d" ]; then
-        cp -a "$ROOT_DIR/storage/$d" "$PAYLOAD/storage/$d"
+# --- database dump helper (gzipped SQL) --------------------------------------
+dump_db_gz() {
+    local out="$1"
+    if [ "${#COMPOSE[@]}" -gt 0 ] && "${COMPOSE[@]}" ps postgres >/dev/null 2>&1; then
+        "${COMPOSE[@]}" exec -T postgres pg_dump -U "$PGUSER" -d "$PGDB" \
+            --no-owner --no-privileges --clean --if-exists 2>/dev/null | gzip > "$out"
+    elif command -v pg_dump >/dev/null 2>&1; then
+        warn "postgres container not found — using local pg_dump."
+        pg_dump -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges --clean --if-exists \
+            2>/dev/null | gzip > "$out"
     else
-        warn "storage/$d not found — skipping."
+        die "Neither the postgres container nor a local pg_dump is available."
     fi
-done
+    [ -s "$out" ] || die "Database dump is empty — aborting."
+}
 
-# --- 3. archive + encrypt ----------------------------------------------------
-STAMP="$(date +%Y%m%d-%H%M%S)"
-ARCHIVE="$TMP/archive.tar.gz"
-OUT="$BACKUP_DIR/digitalcore-${STAMP}.tar.gz.enc"
-
-info "Creating archive…"
-tar -czf "$ARCHIVE" -C "$PAYLOAD" .
-
-info "Encrypting archive…"
-if ! openssl enc -aes-256-cbc -pbkdf2 -salt -pass "pass:$BACKUP_KEY" -in "$ARCHIVE" -out "$OUT"; then
-    rm -f "$OUT"
-    die "Encryption failed."
-fi
-chmod 600 "$OUT"
-ok "Backup written: $(basename "$OUT") ($(wc -c < "$OUT") bytes, mode 0600)."
-
-# --- 4. prune to newest BACKUP_KEEP ------------------------------------------
-mapfile -t all_backups < <(
-    find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.tar.gz.enc' -printf '%T@ %p\n' 2>/dev/null \
-        | sort -rn | cut -d' ' -f2-
-)
-if [ "${#all_backups[@]}" -gt "$BACKUP_KEEP" ]; then
-    for old in "${all_backups[@]:BACKUP_KEEP}"; do
-        rm -f "$old"
-        warn "Pruned old backup: $(basename "$old")"
+collect_storage() {
+    local target="$1" d args=()
+    for d in receipts tickets exports qrcodes uploads; do
+        [ -d "$ROOT_DIR/storage/$d" ] && args+=("storage/$d")
     done
-fi
-ok "Retention: keeping newest ${BACKUP_KEEP} backup(s)."
+    if [ "${#args[@]}" -gt 0 ]; then
+        tar -czf "$target" -C "$ROOT_DIR" "${args[@]}"
+    else
+        warn "No storage subdirs to back up — writing an empty archive."
+        : > "$TMP/EMPTY"
+        tar -czf "$target" -C "$TMP" EMPTY
+    fi
+}
 
-# --- result: the final path on the LAST stdout line --------------------------
-printf '%s\n' "$OUT"
+finalize() {
+    local path="$1"
+    chmod 600 "$path"
+    if command -v sha256sum >/dev/null 2>&1; then
+        ( cd "$(dirname "$path")" && sha256sum "$(basename "$path")" > "$path.sha256" )
+        chmod 600 "$path.sha256"
+    fi
+    ok "Backup written: $(basename "$path") ($(wc -c < "$path") bytes, mode 0600)."
+    printf '%s\n' "$path"
+}
+
+case "$MODE" in
+    database)
+        OUT="$DEST_DIR/digitalcore-db-${STAMP}.sql.gz"
+        info "Dumping database '${PGDB}'…"
+        dump_db_gz "$OUT"
+        finalize "$OUT"
+        ;;
+    storage)
+        OUT="$DEST_DIR/digitalcore-storage-${STAMP}.tar.gz"
+        info "Archiving storage/…"
+        collect_storage "$OUT"
+        finalize "$OUT"
+        ;;
+    full)
+        OUT="$DEST_DIR/digitalcore-full-${STAMP}.tar.gz"
+        info "Building full backup (database + storage)…"
+        PAYLOAD="$TMP/payload"; mkdir -p "$PAYLOAD/database"
+        dump_db_gz "$PAYLOAD/database/digitalcore-db-${STAMP}.sql.gz"
+        for d in receipts tickets exports qrcodes uploads; do
+            if [ -d "$ROOT_DIR/storage/$d" ]; then
+                mkdir -p "$PAYLOAD/storage"
+                cp -a "$ROOT_DIR/storage/$d" "$PAYLOAD/storage/$d"
+            fi
+        done
+        printf '{"kind":"full","tool":"pg_dump","created_at":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PAYLOAD/metadata.json"
+        cat > "$PAYLOAD/RESTORE.txt" <<'TXT'
+DigitalCore full backup — restore with:  bash scripts/restore.sh <this-archive>
+(you will be asked to type RESTORE_DIGITALCORE; a pre-restore backup is made first).
+TXT
+        tar -czf "$OUT" -C "$PAYLOAD" .
+        finalize "$OUT"
+        ;;
+esac

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.maint.backups_title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>💾 {{ _("web.maint.backups_title") }}</h1>
+  <p class="muted"><a href="/admin/maintenance">{{ _("web.maint.back") }}</a> · {{ _("web.maint.backups_subtitle") }}</p></header>
+{% if saved %}<section class="note ok"><p>{{ _("web.maint.flash." + saved) if saved else "" }}</p></section>{% endif %}
+{% if error %}<section class="note err"><p>{{ _("web.maint.err." + error) if error else "" }}</p></section>{% endif %}
+
+<section class="panel">
+  <h2 class="panel-title">➕ {{ _("web.maint.create_title") }}</h2>
+  {% if not backups_enabled %}<p class="muted">{{ _("web.maint.err.disabled") }}</p>{% else %}
+  <form method="post" action="/admin/maintenance/backups/create" class="create-form">
+    <select name="backup_type">
+      <option value="database">{{ _("web.maint.type.database") }}</option>
+      <option value="storage">{{ _("web.maint.type.storage") }}</option>
+      <option value="full" selected>{{ _("web.maint.type.full") }}</option>
+    </select>
+    <button class="btn primary small" type="submit">{{ _("web.maint.create_btn") }}</button>
+  </form>
+  <p class="muted small">{{ _("web.maint.create_hint") }}</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">📋 {{ _("web.maint.list_title") }}</h2>
+  {% if not backups %}<p class="muted">{{ _("web.maint.no_backups") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>#</th><th>{{ _("web.maint.col.type") }}</th><th>{{ _("web.maint.col.status") }}</th><th>{{ _("web.maint.col.size") }}</th><th>{{ _("web.maint.col.checksum") }}</th><th>{{ _("web.maint.col.when") }}</th><th>{{ _("web.maint.col.actions") }}</th></tr></thead>
+    <tbody>{% for b in backups %}<tr>
+      <td><a href="/admin/maintenance/backups/{{ b.id }}">#{{ b.id }}</a></td>
+      <td>{{ b.backup_type }}</td>
+      <td><span class="pill {{ 'ok' if b.status=='completed' else ('warn' if b.status in ('failed','deleted') else '') }}">{{ b.status }}</span></td>
+      <td class="muted small">{{ "{:,}".format(b.file_size) if b.file_size else "—" }}</td>
+      <td class="muted small">{{ (b.checksum_sha256[:12] ~ "…") if b.checksum_sha256 else "—" }}</td>
+      <td class="muted small">{{ b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "—" }}</td>
+      <td class="row-actions">
+        {% if b.status == 'completed' and can_download and download_enabled %}
+          <a class="btn small" href="/admin/maintenance/backups/{{ b.id }}/download">⬇️</a>{% endif %}
+        {% if b.status == 'completed' %}
+          <form method="post" action="/admin/maintenance/backups/{{ b.id }}/verify" class="inline"><button class="btn small">✓</button></form>{% endif %}
+        {% if b.status != 'deleted' %}
+          <form method="post" action="/admin/maintenance/backups/{{ b.id }}/delete" class="inline" onsubmit="return confirm('{{ _("web.maint.confirm_delete") }}')"><button class="btn small danger">🗑</button></form>{% endif %}
+      </td>
+    </tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+{% endblock %}

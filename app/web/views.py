@@ -7,6 +7,7 @@ translator. Auth is a JWT session cookie (see app/web/deps.py).
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from urllib.parse import quote
 
@@ -48,6 +49,7 @@ from app.core.statuses import (
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
+    backup_service,
     coupon_service,
     export_service,
     license_service,
@@ -56,6 +58,7 @@ from app.services import (
     product_service,
     referral_service,
     report_service,
+    restore_service,
     ticket_service,
     tutorial_service,
     user_service,
@@ -241,6 +244,19 @@ NAV_TREE: list[dict] = [
          "permission": "view_reports"},
         {"label_key": "nav.reports.exports", "icon": "📤", "href": "/admin/reports/exports",
          "permission": "export_reports"},
+    ]},
+
+    {"label_key": "nav.maintenance", "icon": "🧰", "children": [
+        {"label_key": "nav.maintenance.overview", "icon": "🧰", "href": "/admin/maintenance",
+         "permission": "view_maintenance"},
+        {"label_key": "nav.maintenance.backups", "icon": "💾", "href": "/admin/maintenance/backups",
+         "permission": "manage_backups"},
+        {"label_key": "nav.maintenance.restore", "icon": "♻️", "href": "/admin/maintenance/restore",
+         "permission": "restore_backups"},
+        {"label_key": "nav.maintenance.health", "icon": "🩺", "href": "/admin/maintenance/health",
+         "permission": "view_health"},
+        {"label_key": "nav.maintenance.system", "icon": "ℹ️", "href": "/admin/maintenance/system-info",
+         "permission": "view_maintenance"},
     ]},
 
     {"label_key": "nav.payments", "icon": "💳", "children": [
@@ -3727,3 +3743,369 @@ async def export_tickets_csv(
     content = await export_service.export_tickets_csv(session, flt["start_dt"], flt["end_dt"])
     await _audit_report(session, admin, request, "tickets", "report.export_created", flt)
     return _csv_response(content, export_service.export_filename("tickets"))
+
+
+# ==========================================================================
+# Maintenance: backups, restore, health, system info (Phase 12)
+# --------------------------------------------------------------------------
+# Backups hold sensitive data: downloads are permission-gated + no-store +
+# path-traversal-safe (paths are resolved under storage/backups only), restore
+# is owner-only and confirmation-gated, and every action is audited (metadata
+# only — never backup contents or secrets).
+# ==========================================================================
+def _maint_ctx(request: Request, admin: Admin | None, **extra):
+    return _ctx(request, admin, **extra)
+
+
+async def _audit_maint(session, admin, request, action: str, *, target_id=None, meta=None) -> None:
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action=action,
+        target_type="backup" if "backup" in action or "restore" in action else "maintenance",
+        target_id=target_id, meta=meta, ip_address=_client_ip(request),
+    )
+
+
+def _maint_back(saved: str = "", error: str = "", path: str = "/admin/maintenance/backups"):
+    q = []
+    if saved:
+        q.append(f"saved={quote(saved)}")
+    if error:
+        q.append(f"error={quote(error)}")
+    sep = "?" if q else ""
+    return RedirectResponse(f"{path}{sep}{'&'.join(q)}", status_code=303)
+
+
+# --- Overview -------------------------------------------------------------
+@router.get("/maintenance", response_class=HTMLResponse)
+async def maintenance_overview(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_maintenance")
+    if deny:
+        return deny
+    svc = SettingsService(session)
+    recent = await backup_service.list_backups(session, limit=5)
+    completed = await backup_service.list_backups(session, status="completed", limit=1)
+    ctx = _maint_ctx(
+        request, admin,
+        recent=recent,
+        latest=(completed[0] if completed else None),
+        maintenance=await svc.get_bool("maintenance_mode", False),
+        maintenance_message=await svc.get_str("maintenance_message", ""),
+        backups_enabled=await svc.get_bool("backups_enabled", True),
+        scheduled_enabled=await svc.get_bool("scheduled_backups_enabled", False),
+        can_backups=has_permission(admin.role, "manage_backups"),
+        can_restore=has_permission(admin.role, "restore_backups"),
+        can_health=has_permission(admin.role, "view_health"),
+        saved=request.query_params.get("saved", ""),
+    )
+    return render_template("maintenance_overview.html", ctx)
+
+
+# --- Backups list + create ------------------------------------------------
+@router.get("/maintenance/backups", response_class=HTMLResponse)
+async def maintenance_backups(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_backups")
+    if deny:
+        return deny
+    svc = SettingsService(session)
+    ctx = _maint_ctx(
+        request, admin,
+        backups=await backup_service.list_backups(session, limit=100),
+        backups_enabled=await svc.get_bool("backups_enabled", True),
+        download_enabled=await svc.get_bool("backup_download_enabled", True),
+        can_download=has_permission(admin.role, "download_backups"),
+        saved=request.query_params.get("saved", ""),
+        error=request.query_params.get("error", ""),
+    )
+    return render_template("backups_list.html", ctx)
+
+
+@router.post("/maintenance/backups/create")
+async def maintenance_backup_create(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    backup_type: str = Form(...),
+):
+    lang, deny = _guard(request, admin, "manage_backups")
+    if deny:
+        return deny
+    if not await SettingsService(session).get_bool("backups_enabled", True):
+        return _maint_back(error="disabled")
+    if backup_type not in backup_service.BACKUP_TYPES:
+        return _maint_back(error="type")
+    job = await backup_service.create_backup_job(session, backup_type, admin_id=admin.id)
+    await _audit_maint(session, admin, request, "backup_job_created", target_id=job.id, meta=f"type={backup_type}")
+    await _audit_maint(session, admin, request, "backup_started", target_id=job.id)
+    job = await backup_service.run_backup_job(session, job.id)
+    if job and job.status == "completed":
+        await _audit_maint(session, admin, request, "backup_completed", target_id=job.id,
+                           meta=f"size={job.file_size}")
+        return _maint_back(saved="created")
+    await _audit_maint(session, admin, request, "backup_failed", target_id=(job.id if job else None),
+                       meta=(job.error_message if job else "unknown"))
+    return _maint_back(error="failed")
+
+
+@router.get("/maintenance/backups/{backup_id}", response_class=HTMLResponse)
+async def maintenance_backup_detail(
+    backup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_backups")
+    if deny:
+        return deny
+    job = await backup_service.get_backup(session, backup_id)
+    if job is None:
+        return RedirectResponse("/admin/maintenance/backups?error=notfound", status_code=303)
+    ctx = _maint_ctx(
+        request, admin, job=job,
+        can_download=has_permission(admin.role, "download_backups"),
+        download_enabled=await SettingsService(session).get_bool("backup_download_enabled", True),
+        verify=request.query_params.get("verify", ""),
+    )
+    return render_template("backup_detail.html", ctx)
+
+
+@router.get("/maintenance/backups/{backup_id}/download")
+async def maintenance_backup_download(
+    backup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "download_backups")
+    if deny:
+        return deny
+    if not await SettingsService(session).get_bool("backup_download_enabled", True):
+        return _forbidden(lang)
+    job = await backup_service.get_backup(session, backup_id)
+    if job is None or job.status == "deleted":
+        return Response(status_code=404)
+    path = backup_service._abs_path(job)
+    if path is None or not path.exists():
+        return Response(status_code=404)
+    await _audit_maint(session, admin, request, "backup_downloaded", target_id=job.id,
+                       meta=f"file={job.file_name}")
+    return FileResponse(
+        path, filename=job.file_name or path.name, media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/maintenance/backups/{backup_id}/verify")
+async def maintenance_backup_verify(
+    backup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_backups")
+    if deny:
+        return deny
+    result = await backup_service.verify_backup(session, backup_id)
+    await _audit_maint(session, admin, request, "backup_verified", target_id=backup_id,
+                       meta=result.get("reason"))
+    return RedirectResponse(
+        f"/admin/maintenance/backups/{backup_id}?verify={quote(result.get('reason', ''))}",
+        status_code=303,
+    )
+
+
+@router.post("/maintenance/backups/{backup_id}/delete")
+async def maintenance_backup_delete(
+    backup_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_backups")
+    if deny:
+        return deny
+    await backup_service.delete_backup(session, backup_id, admin_id=admin.id)
+    await _audit_maint(session, admin, request, "backup_deleted", target_id=backup_id)
+    return _maint_back(saved="deleted")
+
+
+# --- Restore (owner only) -------------------------------------------------
+@router.get("/maintenance/restore", response_class=HTMLResponse)
+async def maintenance_restore(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "restore_backups")
+    if deny:
+        return deny
+    ctx = _maint_ctx(
+        request, admin,
+        backups=await backup_service.list_backups(session, status="completed", limit=100),
+        error=request.query_params.get("error", ""),
+    )
+    return render_template("restore.html", ctx)
+
+
+@router.post("/maintenance/restore/plan", response_class=HTMLResponse)
+async def maintenance_restore_plan(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    backup_id: int = Form(...),
+):
+    lang, deny = _guard(request, admin, "restore_backups")
+    if deny:
+        return deny
+    plan = await restore_service.create_restore_plan(session, backup_id)
+    if not plan.get("backup"):
+        return RedirectResponse("/admin/maintenance/restore?error=notfound", status_code=303)
+    token = restore_service.generate_restore_confirm_token(admin.id, backup_id)
+    await _audit_maint(session, admin, request, "restore_plan_created", target_id=backup_id)
+    ctx = _maint_ctx(request, admin, plan=plan, backup_id=backup_id, confirm_token=token,
+                     sentinel=restore_service.RESTORE_SENTINEL)
+    return render_template("restore_plan.html", ctx)
+
+
+@router.post("/maintenance/restore/confirm", response_class=HTMLResponse)
+async def maintenance_restore_confirm(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    backup_id: int = Form(...),
+    confirm_token: str = Form(""),
+    confirm_phrase: str = Form(""),
+):
+    lang, deny = _guard(request, admin, "restore_backups")
+    if deny:
+        return deny
+    if confirm_phrase != restore_service.RESTORE_SENTINEL:
+        return RedirectResponse("/admin/maintenance/restore?error=phrase", status_code=303)
+    job = await backup_service.get_backup(session, backup_id)
+    if job is None:
+        return RedirectResponse("/admin/maintenance/restore?error=notfound", status_code=303)
+    await _audit_maint(session, admin, request, "restore_confirmed", target_id=backup_id)
+    await _audit_maint(session, admin, request, "restore_started", target_id=backup_id)
+    try:
+        if job.backup_type == "storage":
+            result = await restore_service.restore_storage_from_backup(
+                session, backup_id, confirm_token, admin_id=admin.id)
+        elif job.backup_type == "database":
+            result = await restore_service.restore_database_from_backup(
+                session, backup_id, confirm_token, admin_id=admin.id)
+        else:
+            result = await restore_service.restore_full_backup(
+                session, backup_id, confirm_token, admin_id=admin.id)
+    except restore_service.RestoreError as exc:
+        await _audit_maint(session, admin, request, "restore_failed", target_id=backup_id,
+                           meta=str(exc))
+        return render_template("restore_result.html", _maint_ctx(
+            request, admin, backup=job, result={"status": "failed", "message": str(exc)}))
+    await _audit_maint(session, admin, request, "restore_completed", target_id=backup_id,
+                       meta=result.get("status"))
+    return render_template("restore_result.html",
+                           _maint_ctx(request, admin, backup=job, result=result))
+
+
+# --- Maintenance mode toggle ---------------------------------------------
+@router.post("/maintenance/mode")
+async def maintenance_mode_toggle(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    action: str = Form(...),
+    message: str = Form(""),
+):
+    lang, deny = _guard(request, admin, "manage_settings")
+    if deny:
+        return deny
+    svc = SettingsService(session)
+    if action == "enable":
+        await svc.set("maintenance_mode", "true", actor_type="admin", actor_id=admin.id, audit=False)
+        await svc.set("maintenance_message", message.strip(), actor_type="admin",
+                      actor_id=admin.id, audit=False)
+        await session.commit()
+        await _audit_maint(session, admin, request, "maintenance_mode_enabled")
+    elif action == "disable":
+        await svc.set("maintenance_mode", "false", actor_type="admin", actor_id=admin.id, audit=False)
+        await session.commit()
+        await _audit_maint(session, admin, request, "maintenance_mode_disabled")
+    return RedirectResponse("/admin/maintenance?saved=mode", status_code=303)
+
+
+# --- Health / diagnostics -------------------------------------------------
+@router.get("/maintenance/health", response_class=HTMLResponse)
+async def maintenance_health(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_health")
+    if deny:
+        return deny
+    from app.core.redis import redis_ok
+    # DB is obviously reachable (we're mid-request on it); confirm with a ping.
+    try:
+        await session.execute(select(func.count()).select_from(BackupJob))
+        db_ok = True
+    except Exception:  # noqa: BLE001
+        db_ok = False
+    try:
+        redis_up = await redis_ok()
+    except Exception:  # noqa: BLE001
+        redis_up = False
+
+    total, used, free = shutil.disk_usage(backup_service.REPO_ROOT)
+    backups = await backup_service.list_backups(session, limit=500)
+    backup_bytes = sum(int(b.file_size or 0) for b in backups if b.status == "completed")
+    failed_jobs = [b for b in backups if b.status == "failed"][:10]
+
+    start, end = report_service.parse_date_range(preset="last_30_days")
+    summary = await report_service.get_dashboard_summary(session, start, end)
+
+    ctx = _maint_ctx(
+        request, admin,
+        db_ok=db_ok, redis_up=redis_up,
+        disk={"total": total, "used": used, "free": free,
+              "pct": round(used / total * 100, 1) if total else 0},
+        backup_bytes=backup_bytes,
+        backup_count=sum(1 for b in backups if b.status == "completed"),
+        failed_jobs=failed_jobs,
+        attention=summary.get("attention", {}),
+        version=__version__,
+    )
+    await _audit_maint(session, admin, request, "health_check_viewed")
+    return render_template("maintenance_health.html", ctx)
+
+
+# --- System info ----------------------------------------------------------
+@router.get("/maintenance/system-info", response_class=HTMLResponse)
+async def maintenance_system_info(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    import platform
+    import sys
+    lang, deny = _guard(request, admin, "view_maintenance")
+    if deny:
+        return deny
+    from app.config import settings as _s
+    info = {
+        "version": __version__,
+        "app_env": _s.APP_ENV,
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        # DB backend name only — NEVER the URL (it contains credentials).
+        "db_backend": (session.bind.dialect.name if session.bind else "unknown"),
+        "storage_root": str(backup_service.STORAGE_ROOT),
+    }
+    ctx = _maint_ctx(request, admin, info=info)
+    return render_template("system_info.html", ctx)

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.maint.health_title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>🩺 {{ _("web.maint.health_title") }}</h1>
+  <p class="muted"><a href="/admin/maintenance">{{ _("web.maint.back") }}</a> · {{ _("web.maint.health_subtitle") }}</p></header>
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{% if db_ok %}🟢{% else %}🔴{% endif %}</div><div class="stat-label">{{ _("web.maint.health.db") }}</div></div>
+  <div class="stat"><div class="stat-num">{% if redis_up %}🟢{% else %}🔴{% endif %}</div><div class="stat-label">{{ _("web.maint.health.redis") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ disk.pct }}%</div><div class="stat-label">{{ _("web.maint.health.disk") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ backup_count }}</div><div class="stat-label">{{ _("web.maint.health.backups") }}</div></div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">💽 {{ _("web.maint.health.storage") }}</h2>
+  <div class="status-rows">
+    <div class="status-row"><span>{{ _("web.maint.health.disk_free") }}</span><span>{{ "{:,}".format((disk.free / 1073741824) | round(1)) }} GB</span></div>
+    <div class="status-row"><span>{{ _("web.maint.health.disk_total") }}</span><span>{{ "{:,}".format((disk.total / 1073741824) | round(1)) }} GB</span></div>
+    <div class="status-row"><span>{{ _("web.maint.health.backup_size") }}</span><span>{{ "{:,}".format((backup_bytes / 1048576) | round(1)) }} MB</span></div>
+    <div class="status-row"><span>{{ _("web.maint.health.version") }}</span><span class="muted small">v{{ version }}</span></div>
+  </div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">⚠️ {{ _("web.reports.attention.title") }}</h2>
+  <div class="status-rows">
+    <div class="status-row"><span>🧾 {{ _("web.reports.attention.pending_receipts") }}</span><span class="pill {{ 'warn' if attention.pending_receipts else 'ok' }}">{{ attention.pending_receipts or 0 }}</span></div>
+    <div class="status-row"><span>🚚 {{ _("web.reports.attention.failed_orders") }}</span><span class="pill {{ 'warn' if attention.failed_orders else 'ok' }}">{{ attention.failed_orders or 0 }}</span></div>
+    <div class="status-row"><span>⚠️ {{ _("web.reports.attention.v2ray_failed") }}</span><span class="pill {{ 'warn' if attention.v2ray_failed else 'ok' }}">{{ attention.v2ray_failed or 0 }}</span></div>
+  </div>
+</section>
+{% if failed_jobs %}
+<section class="panel">
+  <h2 class="panel-title">🔴 {{ _("web.maint.health.failed_jobs") }}</h2>
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>#</th><th>{{ _("web.maint.col.type") }}</th><th>{{ _("web.maint.col.error") }}</th></tr></thead>
+    <tbody>{% for j in failed_jobs %}<tr><td>#{{ j.id }}</td><td>{{ j.backup_type }}</td><td class="muted small">{{ j.error_message or "—" }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>{% endif %}
+{% endblock %}

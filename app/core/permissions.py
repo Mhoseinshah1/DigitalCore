@@ -65,6 +65,12 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_user_reports",       # user growth / activity analytics
         "view_service_reports",    # license stock + v2ray service reports
         "export_reports",          # download any CSV export
+        # Phase 12 — backup / restore / maintenance.
+        "view_maintenance",  # maintenance overview + system info
+        "view_health",       # health / diagnostics page
+        "manage_backups",    # create / list / verify / delete backups
+        "download_backups",  # download a backup file
+        "restore_backups",   # run a restore (owner only)
     }
 )
 
@@ -110,6 +116,11 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_user_reports",
             "view_service_reports",
             "export_reports",
+            # Maintenance: everything except restore (owner-only).
+            "view_maintenance",
+            "view_health",
+            "manage_backups",
+            "download_backups",
         }
     ),
     # Support: view users, block/restrict them, view license status (no secrets,
@@ -121,7 +132,9 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
          "restrict_users", "view_licenses", "view_services", "view_wallet_topups",
          "view_tickets", "manage_tickets", "view_coupons",
          # Reports: users, tickets, license stock + v2ray status — no money, no export.
-         "view_reports", "view_user_reports", "view_service_reports"}
+         "view_reports", "view_user_reports", "view_service_reports",
+         # Maintenance: read-only health / diagnostics only (no backups, no restore).
+         "view_maintenance", "view_health"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; approve /
     # reject wallet top-ups and refund payments; can VIEW tickets + coupon usages
@@ -323,3 +336,29 @@ def can_view_service_reports(role: object) -> bool:
 def can_export_reports(role: object) -> bool:
     """Download CSV exports."""
     return has_permission(role, "export_reports")
+
+
+# --- Phase 12 — backup / restore / maintenance --------------------------------
+def can_view_maintenance(role: object) -> bool:
+    """See the maintenance overview + system info."""
+    return has_permission(role, "view_maintenance")
+
+
+def can_view_health(role: object) -> bool:
+    """See the health / diagnostics page."""
+    return has_permission(role, "view_health")
+
+
+def can_manage_backups(role: object) -> bool:
+    """Create / list / verify / delete backups."""
+    return has_permission(role, "manage_backups")
+
+
+def can_download_backups(role: object) -> bool:
+    """Download a backup file."""
+    return has_permission(role, "download_backups")
+
+
+def can_restore_backups(role: object) -> bool:
+    """Run a restore (owner only)."""
+    return has_permission(role, "restore_backups")

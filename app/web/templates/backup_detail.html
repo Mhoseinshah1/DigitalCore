@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.maint.detail_title", id=job.id) }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>💾 {{ _("web.maint.detail_title", id=job.id) }}</h1>
+  <p class="muted"><a href="/admin/maintenance/backups">{{ _("web.maint.back_backups") }}</a></p></header>
+{% if verify %}<section class="note {{ 'ok' if verify=='checksum_ok' else 'err' }}"><p>{{ _("web.maint.verify." + verify) if verify else "" }}</p></section>{% endif %}
+<section class="panel">
+  <div class="status-rows">
+    <div class="status-row"><span>{{ _("web.maint.col.type") }}</span><span>{{ job.backup_type }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.col.status") }}</span>
+      <span class="pill {{ 'ok' if job.status=='completed' else ('warn' if job.status in ('failed','deleted') else '') }}">{{ job.status }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.col.file") }}</span><span class="muted small">{{ job.file_name or "—" }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.col.size") }}</span><span>{{ "{:,}".format(job.file_size) if job.file_size else "—" }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.col.checksum") }}</span><span class="muted small mono">{{ job.checksum_sha256 or "—" }}</span></div>
+    <div class="status-row"><span>{{ _("web.maint.col.when") }}</span><span class="muted small">{{ job.created_at.strftime("%Y-%m-%d %H:%M") if job.created_at else "—" }}</span></div>
+    {% if job.error_message %}<div class="status-row"><span>{{ _("web.maint.col.error") }}</span><span class="muted small">{{ job.error_message }}</span></div>{% endif %}
+  </div>
+  <div class="report-actions">
+    {% if job.status == 'completed' and can_download and download_enabled %}
+      <a class="btn small" href="/admin/maintenance/backups/{{ job.id }}/download">⬇️ {{ _("web.maint.download") }}</a>{% endif %}
+    {% if job.status == 'completed' %}
+      <form method="post" action="/admin/maintenance/backups/{{ job.id }}/verify" class="inline"><button class="btn small">✓ {{ _("web.maint.verify_btn") }}</button></form>{% endif %}
+    {% if job.status != 'deleted' %}
+      <form method="post" action="/admin/maintenance/backups/{{ job.id }}/delete" class="inline" onsubmit="return confirm('{{ _("web.maint.confirm_delete") }}')"><button class="btn small danger">🗑 {{ _("web.maint.delete") }}</button></form>{% endif %}
+  </div>
+</section>
+{% endblock %}
