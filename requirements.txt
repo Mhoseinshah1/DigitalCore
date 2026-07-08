@@ -1,5 +1,5 @@
 # Backend API
-fastapi==0.115.6
+fastapi==0.139.0
 uvicorn[standard]==0.34.0
 
 # Auth / crypto
