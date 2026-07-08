@@ -3,8 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ _("nav.dashboard") }}{% endblock %} · DigitalCore</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  {# Apply the saved theme before first paint to avoid a flash. #}
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('dc-theme');
+        if (!t) { t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+        if (t === 'dark') { document.documentElement.classList.add('theme-dark'); }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/css/admin-theme.css">
 </head>
 <body>
 {% if admin %}
@@ -23,7 +34,7 @@
           </summary>
           <div class="nav-sub">
             {% for it in sec.children %}
-            <a class="nav-link{% if it.active %} active{% endif %}" href="{{ it.href }}">
+            <a class="nav-link{% if it.active %} active{% endif %}" href="{{ it.href }}"{% if it.active %} aria-current="page"{% endif %}>
               <span class="nav-ico">{{ it.icon }}</span>
               <span class="nav-label">{{ it.label }}</span>
               {% if it.placeholder %}<span class="nav-badge">{{ _("web.nav.soon") }}</span>{% endif %}
@@ -32,7 +43,7 @@
           </div>
         </details>
         {% else %}
-        <a class="nav-link nav-top{% if sec.active %} active{% endif %}" href="{{ sec.href }}">
+        <a class="nav-link nav-top{% if sec.active %} active{% endif %}" href="{{ sec.href }}"{% if sec.active %} aria-current="page"{% endif %}>
           <span class="nav-ico">{{ sec.icon }}</span>
           <span class="nav-label">{{ sec.label }}</span>
           {% if sec.placeholder %}<span class="nav-badge">{{ _("web.nav.soon") }}</span>{% endif %}
@@ -41,13 +52,14 @@
       {% endfor %}
     </nav>
     <div class="sidebar-foot">
-      <div class="ver">v{{ version }}</div>
+      {% if app_env and app_env != 'production' %}<span class="env-badge">{{ app_env }}</span>{% endif %}
+      <div class="ver">DigitalCore · v{{ version }}</div>
     </div>
   </aside>
 
   <div class="main-col">
     <header class="topbar">
-      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+      <button class="nav-toggle" id="navToggle" aria-label="{{ _('web.nav.toggle') }}">☰</button>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
         <div class="lang-switch">
@@ -55,7 +67,8 @@
           <span>·</span>
           <a href="/admin/lang/en" class="{% if lang == 'en' %}active{% endif %}">English</a>
         </div>
-        <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · {{ _("web.owner_badge") }}{% endif %}</div>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="{{ _('web.theme.toggle') }}" title="{{ _('web.theme.toggle') }}">🌙</button>
+        <div class="who">👤 {{ admin.username or admin.email }}{% if admin.is_super_admin %} · <span class="role-badge">{{ _("web.owner_badge") }}</span>{% endif %}</div>
         <a class="btn small logout-btn" href="/admin/logout">{{ _("web.logout") }}</a>
       </div>
     </header>
@@ -77,6 +90,19 @@
       });
     }
     if (scrim) { scrim.addEventListener('click', close); }
+
+    var themeBtn = document.getElementById('themeToggle');
+    function syncThemeIcon() {
+      if (themeBtn) { themeBtn.textContent = document.documentElement.classList.contains('theme-dark') ? '☀️' : '🌙'; }
+    }
+    syncThemeIcon();
+    if (themeBtn) {
+      themeBtn.addEventListener('click', function () {
+        var dark = document.documentElement.classList.toggle('theme-dark');
+        try { localStorage.setItem('dc-theme', dark ? 'dark' : 'light'); } catch (e) {}
+        syncThemeIcon();
+      });
+    }
   })();
 </script>
 {% else %}

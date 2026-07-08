@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import empty_state %}
 {% block title %}{{ _("web.coupons.title") }}{% endblock %}
 {% block content %}
 <header class="page-head">
@@ -10,7 +11,7 @@
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
 {% if not coupons %}
-<section class="note"><p class="muted">{{ _("web.coupons.empty") }}</p></section>
+<section class="panel">{{ empty_state(_("web.coupons.empty"), icon="🏷️") }}</section>
 {% else %}
 <section class="panel">
   <div class="table-wrap">

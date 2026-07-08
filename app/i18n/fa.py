@@ -422,6 +422,8 @@ CATALOG: dict[str, str] = {
     "web.nav.reports": "گزارش‌ها",
     "web.nav.audit_logs": "لاگ‌ها",
     "web.nav.soon": "به‌زودی",
+    "web.nav.toggle": "باز و بستن منو",
+    "web.theme.toggle": "تغییر حالت تیره",
     "web.placeholder.body": "این بخش به‌زودی اضافه می‌شود.",
     "web.placeholder.hint": "رابط کاربری آماده است؛ بخش پشتیبان این قسمت در حال ساخت است.",
 
@@ -484,6 +486,11 @@ CATALOG: dict[str, str] = {
     "dash.sales": "فروش",
     "dash.on": "روشن",
     "dash.off": "خاموش",
+    "dash.quick.add_product": "افزودن محصول",
+    "dash.quick.categories": "دسته‌بندی محصولات",
+    "dash.quick.xui_sync": "سرورهای 3X-UI",
+    "dash.quick.sales_report": "گزارش فروش",
+    "dash.quick.payment_settings": "تنظیمات پرداخت",
 
     # --- users list -------------------------------------------------------------
     "users.title": "کاربران",

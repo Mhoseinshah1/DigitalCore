@@ -422,6 +422,8 @@ CATALOG: dict[str, str] = {
     "web.nav.reports": "Reports",
     "web.nav.audit_logs": "Audit logs",
     "web.nav.soon": "soon",
+    "web.nav.toggle": "Toggle navigation",
+    "web.theme.toggle": "Toggle dark mode",
     "web.placeholder.body": "This section is coming soon.",
     "web.placeholder.hint": "The interface is ready; the backend for this section is being built.",
 
@@ -484,6 +486,11 @@ CATALOG: dict[str, str] = {
     "dash.sales": "Sales",
     "dash.on": "on",
     "dash.off": "off",
+    "dash.quick.add_product": "Add product",
+    "dash.quick.categories": "Product categories",
+    "dash.quick.xui_sync": "3X-UI servers",
+    "dash.quick.sales_report": "Sales report",
+    "dash.quick.payment_settings": "Payment settings",
 
     # --- users list -------------------------------------------------------------
     "users.title": "Users",

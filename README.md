@@ -222,6 +222,42 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   timeout, a rich **connection test** (auth + server status + inbounds), robust
   **inbound sync** that upserts and never deletes, and a **dry-run product
   validator**. See **Sanaei 3X-UI integration** below.
+- **Admin panel UI redesign — done.** A UI/UX-only pass over the server-rendered
+  admin panel (no business logic touched): a single token-driven design system in
+  `app/web/static/css/admin-theme.css` (premium, **RTL-first**, Persian-friendly,
+  **light by default with a `theme-dark` foundation** and an in-topbar toggle),
+  polished sidebar / topbar / cards / tables / forms / status badges / alerts,
+  reusable **empty-state** and **badge** macros, a redesigned dashboard (KPI cards
+  + quick actions), and mobile responsiveness. See **Admin panel theme** below.
+
+### Admin panel theme
+
+All admin styling lives in one token-driven stylesheet,
+`app/web/static/css/admin-theme.css`. It defines `--dc-*` **design tokens**
+(colors, radii, shadows, sidebar width) and keeps legacy variable aliases so
+every existing Jinja template restyles automatically — no per-page rewrite.
+
+- **Light by default, dark-ready.** Add `theme-dark` on `<html>` for the dark
+  palette; a topbar 🌙/☀️ toggle persists the choice in `localStorage` and an
+  early inline script applies it before first paint (no flash). First visit
+  honours `prefers-color-scheme`.
+- **RTL-first & Persian-friendly.** The sidebar sits on the right in `fa` via
+  logical properties; the font stack is `Vazirmatn` (bundled locally, **no
+  CDN**) with `IRANSans`/`Tahoma`/system fallbacks.
+- **Components.** Polished sidebar (grouped, active-state highlight), sticky
+  topbar (admin identity, env + version badge, language + theme toggles), card
+  tables with uppercase headers and row hover, form fields with focus rings and
+  sticky actions, status **pills** (`ok`/`warn`/`error`/`danger`/`info`/`muted`),
+  left-accent **alerts** that wrap long text, breadcrumbs, and pagination.
+- **Reusable macros** (`app/web/templates/_macros.html`): `empty_state`,
+  `badge`, `stat_card`, `quick_tile` — presentation-only helpers.
+- **Dashboard.** KPI cards with colored icon chips, RBAC-gated quick-action
+  tiles (only routes the admin can reach), the 30-day attention panel, and a
+  system-status panel.
+- **Responsive.** Off-canvas sidebar under 860px, horizontally-scrolling tables,
+  single-column cards on small screens, `prefers-reduced-motion` respected.
+
+No CDN, no build step, no JS framework — the panel stays server-rendered Jinja.
 
 ### Sanaei 3X-UI integration
 
