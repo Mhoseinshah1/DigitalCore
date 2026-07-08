@@ -19,7 +19,7 @@ from aiogram.types import (
 
 from app.bot.handlers.user.orders import _start_action_payment, action_purchase_cb
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import (
     product_service,
     user_service,
@@ -115,7 +115,7 @@ async def render_services(reply, tg_user, _: Callable[..., str], lang: str) -> N
 
 
 @router.message(Command("my_services"))
-@router.message(F.text.in_(texts_for("btn.my_services")))
+@router.message(F.text.in_(menu_texts("btn.my_services")))
 async def on_my_services(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

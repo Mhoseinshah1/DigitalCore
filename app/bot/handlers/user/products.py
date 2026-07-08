@@ -20,7 +20,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.database import SessionLocal
-from app.i18n import t, texts_for
+from app.i18n import menu_texts, t
 from app.models.product import Product
 from app.services import product_category_service, product_service, xui_server_service
 
@@ -149,7 +149,7 @@ async def render_category_products(
 
 
 @router.message(Command("products"))
-@router.message(F.text.in_(texts_for("btn.products")))
+@router.message(F.text.in_(menu_texts("btn.products")))
 async def on_products(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

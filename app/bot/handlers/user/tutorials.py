@@ -21,7 +21,7 @@ from aiogram.types import (
 )
 
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import tutorial_service
 
 log = logging.getLogger("bot.user.tutorials")
@@ -61,7 +61,7 @@ async def _show_home(message: Message, _: Callable[..., str]) -> None:
 
 
 @router.message(Command("tutorials"))
-@router.message(F.text.in_(texts_for("btn.tutorials")))
+@router.message(F.text.in_(menu_texts("btn.tutorials")))
 async def on_tutorials(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

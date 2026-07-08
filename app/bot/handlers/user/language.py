@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.bot.keyboards.user import user_main_menu_async
 from app.database import SessionLocal
-from app.i18n import SUPPORTED, normalize_lang, t, texts_for
+from app.i18n import SUPPORTED, menu_texts, normalize_lang, t
 from app.services import user_service
 
 router = Router(name="user.language")
@@ -30,7 +30,7 @@ def language_picker_keyboard() -> InlineKeyboardMarkup:
 
 
 @router.message(Command("language"))
-@router.message(F.text.in_(texts_for("btn.language")))
+@router.message(F.text.in_(menu_texts("btn.language")))
 async def on_language_command(
     message: Message, _: Callable[..., str], lang: str = "fa"
 ) -> None:

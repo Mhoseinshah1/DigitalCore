@@ -9,13 +9,13 @@ from aiogram.types import Message
 
 from app.core.settings_service import SettingsService
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 
 router = Router(name="user.rules")
 
 
 @router.message(Command("rules"))
-@router.message(F.text.in_(texts_for("btn.rules")))
+@router.message(F.text.in_(menu_texts("btn.rules")))
 async def on_rules(message: Message, _: Callable[..., str]) -> None:
     async with SessionLocal() as session:
         text = await SettingsService(session).get_str("rules_text", "")

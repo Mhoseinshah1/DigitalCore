@@ -18,7 +18,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.bot.keyboards.user import license_section_title
 from app.database import SessionLocal
-from app.i18n import texts_for
+from app.i18n import menu_texts
 from app.services import (
     license_service,
     order_service,
@@ -90,7 +90,7 @@ async def _account_summary(tg_user, _: Callable[..., str], lang: str) -> tuple[s
 
 
 @router.message(Command("account"))
-@router.message(F.text.in_(texts_for("btn.account")))
+@router.message(F.text.in_(menu_texts("btn.account")))
 async def on_account(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:

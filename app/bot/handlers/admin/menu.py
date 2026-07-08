@@ -11,9 +11,24 @@ from app.bot.handlers.admin.panel import build_overview
 from app.bot.keyboards.admin import admin_main_menu
 from app.bot.keyboards.user import user_main_menu_async
 from app.core.permissions import Role, has_permission
+from app.database import SessionLocal
 from app.i18n import texts_for
+from app.services.diagnostics import bot_state_report, format_report
 
 router = Router(name="admin.menu")
+
+
+@router.message(Command("debug_bot_state"))
+async def on_debug_bot_state(
+    message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    """Admin-only runtime diagnostic: migration/category/product/settings state."""
+    if role is None:
+        await message.answer(_("admin.not_authorized"))
+        return
+    async with SessionLocal() as session:
+        report = await bot_state_report(session)
+    await message.answer(f"<pre>{format_report(report)}</pre>", parse_mode="HTML")
 
 
 @router.message(Command("admin"))

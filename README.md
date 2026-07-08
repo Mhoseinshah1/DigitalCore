@@ -271,6 +271,35 @@ state. **«سفارش‌های من»** now renders a readable multi-line block 
 status). New settings: `license_section_title` (texts) and
 `online_gateway_enabled` (payment, default off).
 
+**Deploying this change (runtime).** The category feature adds migration **0019**
+and maps `Product.category_id`. Because the container entrypoint does **not**
+auto-migrate by default, a deploy that only rebuilds images without running
+migrations leaves the DB one revision behind — then every product/account query
+raises `column products.category_id does not exist` and the bot's products,
+account and order flows fail silently. After pulling, always run:
+
+```bash
+docker compose build backend bot worker
+docker compose up -d backend bot worker
+docker compose exec -T backend alembic upgrade head   # ← required
+docker compose restart bot
+```
+
+(`scripts/update.sh` already does this.) Set `AUTO_MIGRATE=true` in the
+environment to have the backend apply migrations on start. To root-cause a "bot
+not OK" report in one command, run the read-only diagnostic — it flags a stale
+schema, counts categories/products, and prints the bot-relevant settings:
+
+```bash
+docker compose exec -T backend python scripts/debug_bot_state.py
+```
+
+Admins get the same report in-bot via **`/debug_bot_state`**. Reply-keyboard
+buttons are matched **tolerantly** (`app/i18n/menu_texts`): both the emoji label
+and a typed/de-emojified variant route correctly, so a user with an older cached
+keyboard is not stuck. If no categories exist yet, the bot shows the flat product
+list — create categories at `/admin/product-categories` to get the category picker.
+
 ### Phase 12 — backup, restore & maintenance
 
 **Backup** (`app/services/backup_service.py`, `backup_jobs` table, migration

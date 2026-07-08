@@ -14,6 +14,7 @@ Only user-facing strings live here. Code, logs, and exceptions stay English.
 from __future__ import annotations
 
 import logging
+import re
 
 from app.i18n.en import CATALOG as EN
 from app.i18n.fa import CATALOG as FA
@@ -66,3 +67,26 @@ def t(key: str, lang: str | None = None, **params: object) -> str:
 def texts_for(key: str) -> set[str]:
     """All translations of a key — for matching button presses in any language."""
     return {t(key, lang) for lang in SUPPORTED}
+
+
+# A leading run of anything that is NOT a Latin/Arabic/Persian letter or a digit —
+# i.e. the emoji / symbol / space prefix on a reply-keyboard label.
+_LEADING_DECOR = re.compile(
+    r"^[^0-9A-Za-z؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]+"
+)
+
+
+def strip_menu_decoration(text: str) -> str:
+    """Drop a label's leading emoji/symbol run so a typed «محصولات» matches «🛍 محصولات»."""
+    return _LEADING_DECOR.sub("", text or "").strip()
+
+
+def menu_texts(key: str) -> set[str]:
+    """``texts_for(key)`` plus emoji-stripped variants.
+
+    Used to match reply-keyboard button presses tolerantly: users who typed the
+    label by hand (no emoji) or whose Telegram client kept an older cached
+    keyboard still route to the right handler.
+    """
+    base = texts_for(key)
+    return base | {s for s in (strip_menu_decoration(x) for x in base) if s}
