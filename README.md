@@ -165,6 +165,71 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   `/admin/referrals`, and `/admin/referral-rewards` (approve / pay / reject).
   **Not** in this phase: reseller, reports dashboard, online payment gateway,
   Marzban / Hiddify adapters, backup changes.
+- **Phase 11 — done.** **Reports + analytics + CSV exports.** A read-only
+  **reports** area (`/admin/reports/...`) turns the existing data into admin
+  analytics: an **overview** of revenue / delivered orders / new + active users
+  and a "needs attention" panel, plus **sales, orders, payments, wallet,
+  products, users, licenses, V2Ray, marketing and support** report pages, each
+  with today / yesterday / 7-day / 30-day / this-month / last-month / custom
+  date filters. All figures come from `report_service` **SQL aggregation**
+  (`func.count/sum/date`, `group_by`) — no full-table scans into Python. Six
+  admin-only **JSON endpoints** (`/admin/reports/api/...`) feed chart-ready data,
+  and ten **CSV exports** (`/admin/reports/export/*.csv`, UTF-8 BOM for Excel)
+  download the underlying rows. Exports are **secret-free by design**: license
+  passwords are never emitted, V2Ray `client_uuid` is masked and subscription
+  URLs dropped, and no XUI credentials / tokens leave the panel. Five report
+  **permissions** (`view_reports`, `view_financial_reports`, `view_user_reports`,
+  `view_service_reports`, `export_reports`) gate pages, endpoints and exports per
+  role, and every view / export writes an **audit** row (report name + date range
+  + filters, never the data). The **dashboard** gained a 30-day analytics
+  snapshot. **Not** in this phase: reseller, online payment gateway, Marzban /
+  Hiddify adapters, backup / restore changes, accounting-grade invoices, external
+  BI integrations.
+
+### Phase 11 — reports, analytics & CSV exports
+
+**Report service** (`app/services/report_service.py`) is the read-only
+aggregation layer. `parse_date_range` / `get_previous_period` /
+`safe_percent_change` handle the date maths (presets + custom, previous-period
+deltas, zero-baseline-safe percentages). Dashboard summaries
+(`get_dashboard_summary`, `get_revenue_summary`, `get_order_summary`,
+`get_user_summary`, `get_product_summary`) plus per-area functions for sales,
+orders, payments, wallet, products, users, licenses and V2Ray return plain
+dict / list structures safe for both templates and JSON. Money is **integer
+toman** (the platform convention — no Decimal money anywhere). Day buckets use
+`func.date(col)`, verified on **both SQLite (tests) and PostgreSQL (runtime)**.
+Optional Phase 9/10 models (tickets, coupons, referrals) are imported
+defensively — `*_AVAILABLE` flags degrade the matching report to
+`{"available": False}` instead of crashing if a checkout predates those phases.
+
+**Export service** (`app/services/export_service.py`) renders UTF-8-with-BOM CSV
+via the stdlib `csv` module, one bounded query per export (`MAX_ROWS` cap,
+logged never silent). `export_orders_csv`, `export_payments_csv`,
+`export_wallet_transactions_csv`, `export_users_csv`, `export_products_csv`,
+`export_licenses_csv`, `export_v2ray_services_csv`, and the optional
+`export_coupon_usages_csv` / `export_referral_rewards_csv` / `export_tickets_csv`
+each emit only non-secret columns.
+
+| Area | Routes |
+|------|--------|
+| Report pages | `GET /admin/reports` + `/sales /orders /payments /wallet /products /users /licenses /v2ray /marketing /support /exports` |
+| Chart JSON | `GET /admin/reports/api/{sales-by-day,user-growth,orders-by-status,payments-by-method,top-products,v2ray-usage}` |
+| CSV exports | `GET /admin/reports/export/{orders,payments,wallet-transactions,users,products,licenses,v2ray-services,coupon-usages,referral-rewards,tickets}.csv` |
+
+**Permissions / roles** — `view_reports` (overview / orders / products / support):
+owner, admin, accountant, support, viewer. `view_financial_reports` (sales /
+payments / wallet / marketing): owner, admin, accountant. `view_user_reports`:
+owner, admin, support. `view_service_reports` (licenses / v2ray): owner, admin,
+support. `export_reports`: owner, admin, accountant. So **viewer** sees the
+overview but cannot export or open financial / user / service drill-downs;
+**accountant** gets the money reports + exports but not user reports; **support**
+gets user + service reports but no money and no export. **Security**: exports
+never include license passwords (no route, no column), V2Ray UUIDs are masked
+and subscription URLs / XUI credentials are never exported, and users export
+omits phone numbers and internal notes. Every view / export is audited
+(`report.viewed`, `report.financial_viewed`, `report.user_viewed`,
+`report.service_viewed`, `report.export_created`) with the report name, date
+range and filters — never the exported data.
 
 ### Phase 10 — coupons & referrals
 
@@ -898,6 +963,31 @@ rows (idempotent; never overwrites custom values).
     increases; with approval required, approve it at `/admin/referral-rewards`.
 12. Confirm no duplicate reward is created for the same order.
 13. Confirm audit rows exist for coupon + referral actions and no secrets leak.
+
+## Phase 11 manual test checklist
+
+1. Log in as **owner/admin** and open `/admin/reports`.
+2. Check the overview cards (revenue, delivered orders, new / active users) and
+   the "needs attention" panel.
+3. Open the **sales** report; switch the date range (today / 7-day / 30-day /
+   this-month / custom start–end) and confirm the figures update.
+4. Open the **orders**, **payments**, **wallet**, **products**, **users**,
+   **licenses**, **V2Ray**, **marketing** and **support** reports in turn.
+5. Export **orders**, **payments** and **users** CSV from the export buttons.
+6. Open each CSV in Excel/Sheets and confirm it has a header row and readable
+   Persian/Unicode text (UTF-8 BOM).
+7. Confirm the exports contain **no secrets** — no license passwords, no full
+   V2Ray UUID (masked `****xxxx`), no subscription URLs, no XUI credentials, no
+   user phone numbers.
+8. Log in as **accountant** — confirm sales / payments / wallet / marketing and
+   the exports work, but `/admin/reports/users` is **denied (403)**.
+9. Log in as **support** — confirm users / licenses / V2Ray reports work, but
+   `/admin/reports/sales` and any export are **denied (403)**.
+10. Log in as **viewer** — confirm the overview loads but every export and the
+    financial / user / service drill-downs are **denied (403)**.
+11. Confirm `AuditLog` rows exist for `report.viewed` /
+    `report.financial_viewed` / `report.export_created` (with the report name +
+    date range), and that the exported data itself is **not** in the audit log.
 
 ## CI / GitHub Actions
 

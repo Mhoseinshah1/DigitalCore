@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.licenses.title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>🔑 {{ _("web.reports.licenses.title") }}</h1><p class="muted">{{ _("web.reports.licenses.subtitle") }}</p></header>
+{% include "reports_filter.html" %}
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ stock.available }}</div><div class="stat-label">🟢 {{ _("web.reports.kpi.available") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ stock.reserved }}</div><div class="stat-label">🔒 {{ _("web.reports.kpi.reserved") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ stock.sold }}</div><div class="stat-label">✅ {{ _("web.reports.kpi.sold") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ sales.sold }}</div><div class="stat-label">🛒 {{ _("web.reports.kpi.sold_in_range") }}</div></div>
+</section>
+<section class="panel two-col">
+  <div>
+    <h2 class="panel-title">📊 {{ _("web.reports.licenses.by_status") }}</h2>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.status") }}</th><th>{{ _("web.reports.col.count") }}</th></tr></thead>
+      <tbody>{% for k, v in stock.by_status.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div>
+    <h2 class="panel-title">📉 {{ _("web.reports.licenses.low_stock") }}</h2>
+    {% if not low_stock %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.product") }}</th><th>{{ _("web.reports.col.available") }}</th><th>{{ _("web.reports.col.threshold") }}</th></tr></thead>
+      <tbody>{% for p in low_stock %}<tr><td>{{ p.title }}</td><td><span class="pill warn">{{ p.available }}</span></td><td>{{ p.threshold }}</td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+  </div>
+</section>
+<p class="report-actions"><a class="btn small" href="/admin/reports/export/licenses.csv">📤 {{ _("web.reports.export_licenses") }}</a></p>
+{% endblock %}

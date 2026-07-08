@@ -1,0 +1,19 @@
+{# Date-range filter shared by every report page. Presets are GET links; the
+   custom range submits start/end. #}
+<form class="report-filter panel" method="get" action="{{ report_path }}">
+  <div class="report-presets">
+    {% for p in report_presets %}
+    <a class="chip{% if preset == p %} active{% endif %}"
+       href="{{ report_path }}?preset={{ p }}">{{ _("web.reports.preset." ~ p) }}</a>
+    {% endfor %}
+  </div>
+  <div class="report-range">
+    <label>{{ _("web.reports.from") }}
+      <input type="date" name="start" value="{{ start or '' }}">
+    </label>
+    <label>{{ _("web.reports.to") }}
+      <input type="date" name="end" value="{{ end or '' }}">
+    </label>
+    <button class="btn small primary" type="submit">{{ _("web.reports.apply") }}</button>
+  </div>
+</form>

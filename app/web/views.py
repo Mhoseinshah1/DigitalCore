@@ -11,7 +11,13 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,11 +49,13 @@ from app.schemas.product import ProductCreate, ProductUpdate
 from app.services import (
     audit_service,
     coupon_service,
+    export_service,
     license_service,
     order_service,
     payment_service,
     product_service,
     referral_service,
+    report_service,
     ticket_service,
     tutorial_service,
     user_service,
@@ -208,6 +216,33 @@ NAV_TREE: list[dict] = [
          "href": "/admin/referral-rewards", "permission": "manage_referrals"},
     ]},
 
+    {"label_key": "nav.reports", "icon": "📊", "children": [
+        {"label_key": "nav.reports.overview", "icon": "📊", "href": "/admin/reports",
+         "permission": "view_reports"},
+        {"label_key": "nav.reports.sales", "icon": "💵", "href": "/admin/reports/sales",
+         "permission": "view_financial_reports"},
+        {"label_key": "nav.reports.orders", "icon": "🧾", "href": "/admin/reports/orders",
+         "permission": "view_reports"},
+        {"label_key": "nav.reports.payments", "icon": "💳", "href": "/admin/reports/payments",
+         "permission": "view_financial_reports"},
+        {"label_key": "nav.reports.wallet", "icon": "👛", "href": "/admin/reports/wallet",
+         "permission": "view_financial_reports"},
+        {"label_key": "nav.reports.products", "icon": "📦", "href": "/admin/reports/products",
+         "permission": "view_reports"},
+        {"label_key": "nav.reports.users", "icon": "📈", "href": "/admin/reports/users",
+         "permission": "view_user_reports"},
+        {"label_key": "nav.reports.licenses", "icon": "🔑", "href": "/admin/reports/licenses",
+         "permission": "view_service_reports"},
+        {"label_key": "nav.reports.v2ray", "icon": "🌐", "href": "/admin/reports/v2ray",
+         "permission": "view_service_reports"},
+        {"label_key": "nav.reports.marketing", "icon": "🏷", "href": "/admin/reports/marketing",
+         "permission": "view_financial_reports"},
+        {"label_key": "nav.reports.support", "icon": "🎫", "href": "/admin/reports/support",
+         "permission": "view_reports"},
+        {"label_key": "nav.reports.exports", "icon": "📤", "href": "/admin/reports/exports",
+         "permission": "export_reports"},
+    ]},
+
     {"label_key": "nav.payments", "icon": "💳", "children": [
         {"label_key": "nav.payments.settings", "icon": "💳", "href": "/admin/settings/payment",
          "permission": "view_payments"},
@@ -245,8 +280,6 @@ NAV_TREE: list[dict] = [
          "permission": "manage_products", "placeholder": True},
         {"label_key": "nav.future.backups", "icon": "💾", "href": "/admin/backups",
          "permission": "manage_settings", "placeholder": True},
-        {"label_key": "nav.future.reports", "icon": "📊", "href": "/admin/reports",
-         "permission": "view_dashboard", "placeholder": True},
     ]},
 ]
 
@@ -260,7 +293,6 @@ PLACEHOLDER_PAGES: list[tuple[str, str, str]] = [
     ("/payments/receipts", "nav.payments.receipts", "view_payments"),
     ("/services", "nav.future.services", "manage_products"),
     ("/backups", "nav.future.backups", "manage_settings"),
-    ("/reports", "nav.future.reports", "view_dashboard"),
 ]
 
 
@@ -472,6 +504,11 @@ async def dashboard(
     site_name = await svc.get_str("site_name", "DigitalCore")
     maintenance = await svc.get_bool("maintenance_mode", False)
     sales = await svc.get_bool("sales_enabled", True)
+    # Phase 11: a 30-day analytics snapshot powered by report_service. Revenue
+    # is only surfaced to admins who may view financial reports; the operational
+    # "needs attention" counters are safe for everyone with view_dashboard.
+    r_start, r_end = report_service.parse_date_range(preset="last_30_days")
+    summary = await report_service.get_dashboard_summary(session, r_start, r_end)
     return render_template(
         "dashboard.html",
         _ctx(
@@ -481,6 +518,9 @@ async def dashboard(
             site_name=site_name,
             maintenance=maintenance,
             sales=sales,
+            summary=summary,
+            can_reports=has_permission(admin.role, "view_reports"),
+            can_financial=has_permission(admin.role, "view_financial_reports"),
         ),
     )
 
@@ -3132,3 +3172,558 @@ async def referral_reward_reject(
     except referral_service.ReferralError as exc:
         return _rewards_back(error=str(exc))
     return _rewards_back(saved="rejected")
+
+
+# ==========================================================================
+# Reports & Analytics (Phase 11)
+# --------------------------------------------------------------------------
+# Read-only report pages, chart-data JSON endpoints, and CSV exports. Every
+# route is admin-authed and gated on a report permission; each view/export
+# writes an audit row (the range + report name, never the report contents).
+# ==========================================================================
+def _report_filter(request: Request) -> dict:
+    """Read preset/start/end from the query string into a filter dict.
+
+    With no parameters the default window is the last 30 days.
+    """
+    qp = request.query_params
+    preset = qp.get("preset") or None
+    start = qp.get("start") or None
+    end = qp.get("end") or None
+    if not preset and not start and not end:
+        preset = "last_30_days"
+    start_dt, end_dt = report_service.parse_date_range(start, end, preset)
+    return {"preset": preset, "start": start, "end": end,
+            "start_dt": start_dt, "end_dt": end_dt}
+
+
+def _report_ctx(request: Request, admin: Admin | None, flt: dict, report_path: str, **extra):
+    return _ctx(
+        request, admin,
+        report_path=report_path,
+        report_presets=report_service.DATE_PRESETS,
+        preset=flt["preset"], start=flt["start"], end=flt["end"],
+        **extra,
+    )
+
+
+async def _audit_report(session, admin, request, name: str, action: str, flt: dict) -> None:
+    bits = [f"report={name}"]
+    if flt["preset"]:
+        bits.append(f"preset={flt['preset']}")
+    if flt["start"]:
+        bits.append(f"start={flt['start']}")
+    if flt["end"]:
+        bits.append(f"end={flt['end']}")
+    await audit_service.log(
+        session, actor_type="admin", actor_id=admin.id, action=action,
+        target_type="report", target_id=name, meta=" ".join(bits),
+        ip_address=_client_ip(request),
+    )
+
+
+def _csv_response(content: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Report pages ---------------------------------------------------------
+@router.get("/reports", response_class=HTMLResponse)
+async def reports_overview(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    summary = await report_service.get_dashboard_summary(session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "overview", "report.viewed", flt)
+    return render_template(
+        "reports_overview.html",
+        _report_ctx(request, admin, flt, "/admin/reports", summary=summary),
+    )
+
+
+@router.get("/reports/sales", response_class=HTMLResponse)
+async def reports_sales(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/sales",
+        revenue=await report_service.get_revenue_summary(session, s, e),
+        by_day=await report_service.get_sales_by_day(session, s, e),
+        by_product=await report_service.get_sales_by_product(session, s, e),
+        by_method=await report_service.get_sales_by_payment_method(session, s, e),
+        by_type=await report_service.get_sales_by_product_type(session, s, e),
+    )
+    await _audit_report(session, admin, request, "sales", "report.financial_viewed", flt)
+    return render_template("reports_sales.html", ctx)
+
+
+@router.get("/reports/orders", response_class=HTMLResponse)
+async def reports_orders(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/orders",
+        summary=await report_service.get_order_summary(session, s, e),
+        by_action=await report_service.get_orders_by_action_type(session, s, e),
+        recent=await report_service.get_recent_orders(session, limit=20),
+        failed_pending=await report_service.get_failed_or_pending_orders(session, limit=20),
+    )
+    await _audit_report(session, admin, request, "orders", "report.viewed", flt)
+    return render_template("reports_orders.html", ctx)
+
+
+@router.get("/reports/payments", response_class=HTMLResponse)
+async def reports_payments(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/payments",
+        by_status=await report_service.get_payments_by_status(session, s, e),
+        by_method=await report_service.get_payments_by_method(session, s, e),
+        pending=await report_service.get_pending_receipt_summary(session),
+        topups=await report_service.get_wallet_topup_summary(session, s, e),
+    )
+    await _audit_report(session, admin, request, "payments", "report.financial_viewed", flt)
+    return render_template("reports_payments.html", ctx)
+
+
+@router.get("/reports/wallet", response_class=HTMLResponse)
+async def reports_wallet(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/wallet",
+        by_type=await report_service.get_wallet_transaction_summary(session, s, e),
+        changes=await report_service.get_wallet_balance_changes(session, s, e),
+        top_users=await report_service.get_top_wallet_users(session, limit=20),
+    )
+    await _audit_report(session, admin, request, "wallet", "report.financial_viewed", flt)
+    return render_template("reports_wallet.html", ctx)
+
+
+@router.get("/reports/products", response_class=HTMLResponse)
+async def reports_products(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/products",
+        summary=await report_service.get_product_summary(session, s, e),
+        top_revenue=await report_service.get_top_products_by_revenue(session, s, e),
+        top_orders=await report_service.get_top_products_by_orders(session, s, e),
+        inactive=await report_service.get_inactive_products(session),
+        low_stock=await report_service.get_low_stock_license_products(session),
+    )
+    await _audit_report(session, admin, request, "products", "report.viewed", flt)
+    return render_template("reports_products.html", ctx)
+
+
+@router.get("/reports/users", response_class=HTMLResponse)
+async def reports_users(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_user_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/users",
+        summary=await report_service.get_user_summary(session, s, e),
+        growth=await report_service.get_user_growth_by_day(session, s, e),
+        blocked_restricted=await report_service.get_blocked_restricted_users(session),
+    )
+    await _audit_report(session, admin, request, "users", "report.user_viewed", flt)
+    return render_template("reports_users.html", ctx)
+
+
+@router.get("/reports/licenses", response_class=HTMLResponse)
+async def reports_licenses(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_service_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/licenses",
+        stock=await report_service.get_license_stock_summary(session),
+        sales=await report_service.get_license_sales_summary(session, s, e),
+        low_stock=await report_service.get_low_stock_license_products(session),
+    )
+    await _audit_report(session, admin, request, "licenses", "report.service_viewed", flt)
+    return render_template("reports_licenses.html", ctx)
+
+
+@router.get("/reports/v2ray", response_class=HTMLResponse)
+async def reports_v2ray(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_service_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    warn_days = await SettingsService(session).get_int("v2ray_expiry_warning_days", 3)
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/v2ray",
+        summary=await report_service.get_v2ray_service_summary(session),
+        expiring=await report_service.get_v2ray_expiring_soon(session, days=max(warn_days, 1)),
+        problems=await report_service.get_v2ray_over_quota_or_failed(session),
+        usage=await report_service.get_v2ray_usage_summary(session),
+        warn_days=max(warn_days, 1),
+    )
+    await _audit_report(session, admin, request, "v2ray", "report.service_viewed", flt)
+    return render_template("reports_v2ray.html", ctx)
+
+
+@router.get("/reports/marketing", response_class=HTMLResponse)
+async def reports_marketing(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/marketing",
+        coupons=await report_service.get_coupon_usage_summary(session, s, e),
+        referrals=await report_service.get_referral_reward_summary(session, s, e),
+        coupons_available=report_service.COUPONS_AVAILABLE,
+        referrals_available=report_service.REFERRALS_AVAILABLE,
+    )
+    await _audit_report(session, admin, request, "marketing", "report.financial_viewed", flt)
+    return render_template("reports_marketing.html", ctx)
+
+
+@router.get("/reports/support", response_class=HTMLResponse)
+async def reports_support(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    s, e = flt["start_dt"], flt["end_dt"]
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/support",
+        tickets=await report_service.get_ticket_summary(session, s, e),
+        open_tickets=await report_service.get_open_ticket_summary(session),
+        tickets_available=report_service.TICKETS_AVAILABLE,
+    )
+    await _audit_report(session, admin, request, "support", "report.viewed", flt)
+    return render_template("reports_support.html", ctx)
+
+
+@router.get("/reports/exports", response_class=HTMLResponse)
+async def reports_exports(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    ctx = _report_ctx(
+        request, admin, flt, "/admin/reports/exports",
+        coupons_available=report_service.COUPONS_AVAILABLE,
+        referrals_available=report_service.REFERRALS_AVAILABLE,
+        tickets_available=report_service.TICKETS_AVAILABLE,
+    )
+    return render_template("reports_exports.html", ctx)
+
+
+# --- Chart-data JSON endpoints -------------------------------------------
+@router.get("/reports/api/sales-by-day")
+async def reports_api_sales_by_day(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    data = await report_service.get_sales_by_day(session, flt["start_dt"], flt["end_dt"])
+    return JSONResponse(data)
+
+
+@router.get("/reports/api/user-growth")
+async def reports_api_user_growth(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_user_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    data = await report_service.get_user_growth_by_day(session, flt["start_dt"], flt["end_dt"])
+    return JSONResponse(data)
+
+
+@router.get("/reports/api/orders-by-status")
+async def reports_api_orders_by_status(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    data = await report_service.get_orders_by_status(session, flt["start_dt"], flt["end_dt"])
+    return JSONResponse(data)
+
+
+@router.get("/reports/api/payments-by-method")
+async def reports_api_payments_by_method(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_financial_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    data = await report_service.get_payments_by_method(session, flt["start_dt"], flt["end_dt"])
+    return JSONResponse(data)
+
+
+@router.get("/reports/api/top-products")
+async def reports_api_top_products(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    data = await report_service.get_top_products_by_revenue(session, flt["start_dt"], flt["end_dt"])
+    return JSONResponse(data)
+
+
+@router.get("/reports/api/v2ray-usage")
+async def reports_api_v2ray_usage(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "view_service_reports")
+    if deny:
+        return deny
+    data = await report_service.get_v2ray_usage_summary(session)
+    return JSONResponse(data)
+
+
+# --- CSV exports ----------------------------------------------------------
+@router.get("/reports/export/orders.csv")
+async def export_orders_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    status = request.query_params.get("status") or None
+    content = await export_service.export_orders_csv(session, flt["start_dt"], flt["end_dt"], status)
+    await _audit_report(session, admin, request, "orders", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("orders"))
+
+
+@router.get("/reports/export/payments.csv")
+async def export_payments_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    method = request.query_params.get("method") or None
+    status = request.query_params.get("status") or None
+    content = await export_service.export_payments_csv(
+        session, flt["start_dt"], flt["end_dt"], method, status)
+    await _audit_report(session, admin, request, "payments", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("payments"))
+
+
+@router.get("/reports/export/wallet-transactions.csv")
+async def export_wallet_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_wallet_transactions_csv(
+        session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "wallet-transactions", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("wallet-transactions"))
+
+
+@router.get("/reports/export/users.csv")
+async def export_users_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_users_csv(session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "users", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("users"))
+
+
+@router.get("/reports/export/products.csv")
+async def export_products_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_products_csv(session)
+    await _audit_report(session, admin, request, "products", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("products"))
+
+
+@router.get("/reports/export/licenses.csv")
+async def export_licenses_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    status = request.query_params.get("status") or None
+    content = await export_service.export_licenses_csv(session, status)
+    await _audit_report(session, admin, request, "licenses", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("licenses"))
+
+
+@router.get("/reports/export/v2ray-services.csv")
+async def export_v2ray_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    status = request.query_params.get("status") or None
+    content = await export_service.export_v2ray_services_csv(session, status)
+    await _audit_report(session, admin, request, "v2ray-services", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("v2ray-services"))
+
+
+@router.get("/reports/export/coupon-usages.csv")
+async def export_coupon_usages_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_coupon_usages_csv(session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "coupon-usages", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("coupon-usages"))
+
+
+@router.get("/reports/export/referral-rewards.csv")
+async def export_referral_rewards_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_referral_rewards_csv(session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "referral-rewards", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("referral-rewards"))
+
+
+@router.get("/reports/export/tickets.csv")
+async def export_tickets_csv(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "export_reports")
+    if deny:
+        return deny
+    flt = _report_filter(request)
+    content = await export_service.export_tickets_csv(session, flt["start_dt"], flt["end_dt"])
+    await _audit_report(session, admin, request, "tickets", "report.export_created", flt)
+    return _csv_response(content, export_service.export_filename("tickets"))

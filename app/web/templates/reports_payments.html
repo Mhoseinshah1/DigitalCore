@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.payments.title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>💳 {{ _("web.reports.payments.title") }}</h1><p class="muted">{{ _("web.reports.payments.subtitle") }}</p></header>
+{% include "reports_filter.html" %}
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ pending.count }}</div><div class="stat-label">🧾 {{ _("web.reports.kpi.pending_receipts") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(pending.amount) }}</div><div class="stat-label">💰 {{ _("web.reports.kpi.pending_amount") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(topups.approved_amount) }}</div><div class="stat-label">👛 {{ _("web.reports.kpi.topups_approved") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ topups.pending_count }}</div><div class="stat-label">⏳ {{ _("web.reports.kpi.topups_pending") }}</div></div>
+</section>
+<section class="panel two-col">
+  <div>
+    <h2 class="panel-title">📊 {{ _("web.reports.payments.by_status") }}</h2>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.status") }}</th><th>{{ _("web.reports.col.count") }}</th><th>{{ _("web.reports.col.amount") }}</th></tr></thead>
+      <tbody>{% for r in by_status %}<tr><td>{{ r.status }}</td><td>{{ r.count }}</td><td>{{ "{:,}".format(r.amount) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div>
+    <h2 class="panel-title">💳 {{ _("web.reports.payments.by_method") }}</h2>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.method") }}</th><th>{{ _("web.reports.col.count") }}</th><th>{{ _("web.reports.col.amount") }}</th></tr></thead>
+      <tbody>{% for r in by_method %}<tr><td>{{ r.method }}</td><td>{{ r.count }}</td><td>{{ "{:,}".format(r.amount) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+</section>
+<p class="report-actions"><a class="btn small" href="/admin/reports/export/payments.csv?{{ ('preset=' ~ preset) if preset else ('start=' ~ (start or '') ~ '&end=' ~ (end or '')) }}">📤 {{ _("web.reports.export_payments") }}</a></p>
+{% endblock %}

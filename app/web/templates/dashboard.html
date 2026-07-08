@@ -25,6 +25,45 @@
   </a>
 </section>
 
+{% if summary %}
+<header class="page-head">
+  <h2>📊 {{ _("dash.analytics_title") }}</h2>
+  <p class="muted">{{ _("dash.analytics_subtitle") }}{% if can_reports %} · <a href="/admin/reports">{{ _("dash.open_reports") }}</a>{% endif %}</p>
+</header>
+<section class="stat-grid">
+  {% if can_financial %}
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(summary.revenue.total) }}</div>
+    <div class="stat-label">💵 {{ _("web.reports.kpi.revenue") }}
+      {% if summary.revenue.change_pct is not none %}<span class="delta {{ 'up' if summary.revenue.change_pct >= 0 else 'down' }}">{{ summary.revenue.change_pct }}%</span>{% endif %}</div></div>
+  {% endif %}
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(summary.orders.delivered) }}</div><div class="stat-label">✅ {{ _("web.reports.kpi.delivered_orders") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(summary.users.new) }}</div><div class="stat-label">🆕 {{ _("web.reports.kpi.new_users") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(summary.users.active) }}</div><div class="stat-label">🟢 {{ _("web.reports.kpi.active_users") }}</div></div>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">⚠️ {{ _("web.reports.attention.title") }}</h2>
+  <div class="status-rows">
+    <div class="status-row"><span>🧾 {{ _("web.reports.attention.pending_receipts") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.pending_receipts else 'ok' }}">{{ summary.attention.pending_receipts }}</span></div>
+    <div class="status-row"><span>👛 {{ _("web.reports.attention.pending_topups") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.pending_topups else 'ok' }}">{{ summary.attention.pending_topups }}</span></div>
+    <div class="status-row"><span>🚚 {{ _("web.reports.attention.failed_orders") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.failed_orders else 'ok' }}">{{ summary.attention.failed_orders }}</span></div>
+    <div class="status-row"><span>📉 {{ _("web.reports.attention.low_stock") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.low_stock_products else 'ok' }}">{{ summary.attention.low_stock_products }}</span></div>
+    <div class="status-row"><span>⏳ {{ _("web.reports.attention.v2ray_expiring") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.v2ray_expiring_soon else 'ok' }}">{{ summary.attention.v2ray_expiring_soon }}</span></div>
+    <div class="status-row"><span>⚠️ {{ _("web.reports.attention.v2ray_failed") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.v2ray_failed else 'ok' }}">{{ summary.attention.v2ray_failed }}</span></div>
+    {% if 'open_tickets' in summary.attention %}
+    <div class="status-row"><span>🎫 {{ _("web.reports.attention.open_tickets") }}</span>
+      <span class="pill {{ 'warn' if summary.attention.open_tickets else 'ok' }}">{{ summary.attention.open_tickets }}</span></div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <section class="panel">
   <h2>{{ _("dash.status_title") }}</h2>
   <div class="status-rows">

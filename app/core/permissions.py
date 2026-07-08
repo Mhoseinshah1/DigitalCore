@@ -59,6 +59,12 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "view_coupons",          # see coupon pages + usages (read-only)
         "manage_coupons",        # create / edit / deactivate coupons
         "manage_referrals",      # see referrals + approve / reject / pay rewards
+        # Phase 11 — reports, analytics + exports.
+        "view_reports",            # reports overview + non-sensitive report pages
+        "view_financial_reports",  # sales / payments / wallet / marketing money
+        "view_user_reports",       # user growth / activity analytics
+        "view_service_reports",    # license stock + v2ray service reports
+        "export_reports",          # download any CSV export
     }
 )
 
@@ -99,6 +105,11 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
             "view_coupons",
             "manage_coupons",
             "manage_referrals",
+            "view_reports",
+            "view_financial_reports",
+            "view_user_reports",
+            "view_service_reports",
+            "export_reports",
         }
     ),
     # Support: view users, block/restrict them, view license status (no secrets,
@@ -108,7 +119,9 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.SUPPORT: frozenset(
         {"view_dashboard", "view_users", "manage_users", "block_users",
          "restrict_users", "view_licenses", "view_services", "view_wallet_topups",
-         "view_tickets", "manage_tickets", "view_coupons"}
+         "view_tickets", "manage_tickets", "view_coupons",
+         # Reports: users, tickets, license stock + v2ray status — no money, no export.
+         "view_reports", "view_user_reports", "view_service_reports"}
     ),
     # Accountant: view users, adjust wallet, view + process payments; approve /
     # reject wallet top-ups and refund payments; can VIEW tickets + coupon usages
@@ -118,12 +131,16 @@ PERMISSIONS: dict[Role, frozenset[str]] = {
         {"view_dashboard", "view_users", "adjust_wallet", "view_payments",
          "approve_payments", "process_payments", "view_licenses", "view_services",
          "view_wallet_topups", "manage_wallet_topups", "refund_payments",
-         "view_tickets", "view_coupons", "manage_referrals"}
+         "view_tickets", "view_coupons", "manage_referrals",
+         # Reports: full financial view (sales/payments/wallet/marketing) + exports.
+         "view_reports", "view_financial_reports", "export_reports"}
     ),
-    # Viewer: read-only dashboard + users + license/service/wallet/ticket/coupon counts.
+    # Viewer: read-only dashboard + users + license/service/wallet/ticket/coupon
+    # counts, and the reports overview — but NO exports and no drill-down into
+    # financial / user / service report pages.
     Role.VIEWER: frozenset(
         {"view_dashboard", "view_users", "view_licenses", "view_services",
-         "view_wallet_topups", "view_tickets", "view_coupons"}
+         "view_wallet_topups", "view_tickets", "view_coupons", "view_reports"}
     ),
 }
 
@@ -280,3 +297,29 @@ def can_manage_coupons(role: object) -> bool:
 def can_manage_referrals(role: object) -> bool:
     """See referrals + approve / reject / pay referral rewards."""
     return has_permission(role, "manage_referrals")
+
+
+# --- Phase 11 — reports & analytics -------------------------------------------
+def can_view_reports(role: object) -> bool:
+    """See the reports overview + non-sensitive report pages."""
+    return has_permission(role, "view_reports")
+
+
+def can_view_financial_reports(role: object) -> bool:
+    """See sales / payments / wallet / marketing money figures."""
+    return has_permission(role, "view_financial_reports")
+
+
+def can_view_user_reports(role: object) -> bool:
+    """See user growth / activity analytics."""
+    return has_permission(role, "view_user_reports")
+
+
+def can_view_service_reports(role: object) -> bool:
+    """See license stock + v2ray service reports."""
+    return has_permission(role, "view_service_reports")
+
+
+def can_export_reports(role: object) -> bool:
+    """Download CSV exports."""
+    return has_permission(role, "export_reports")
