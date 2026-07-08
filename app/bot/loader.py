@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from aiogram import Bot, Dispatcher
 
+from app.bot.handlers.admin import fallback as admin_fallback
 from app.bot.handlers.admin import menu as admin_menu
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import products as admin_products
@@ -70,4 +71,6 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(user_services.router)
     dp.include_router(user_tutorials.router)
     dp.include_router(user_referral.router)
+    # LAST: catch admin text no other router handled (dead-button safety net).
+    dp.include_router(admin_fallback.router)
     return dp

@@ -215,8 +215,12 @@ async def submit_receipt(
     when = _now()
     rel = build_receipt_relpath(order.order_number, file_info.original_name, file_info.mime_type, when)
     dest = RECEIPTS_ROOT / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(file_info.content)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(file_info.content)
+    except OSError as exc:  # unwritable storage (perms / missing mount) — surface it
+        log.error("receipt storage write failed at %s: %s", dest, exc)
+        raise ReceiptError("could not save the receipt file", code="storage") from exc
 
     payment.receipt_path = rel
     payment.receipt_file_id = file_info.file_id

@@ -17,11 +17,21 @@ from aiogram.types import (
     Message,
 )
 
+from app.bot.payment_ui import (
+    UNIMPLEMENTED_GATEWAY_TYPES,
+    manual_receipt_keyboard,
+    method_label,
+)
 from app.core.settings_service import SettingsService
 from app.core.statuses import wallet_tx_type_label
 from app.database import SessionLocal
 from app.i18n import menu_texts
-from app.services import payment_service, user_service, wallet_service
+from app.services import (
+    payment_core_service,
+    payment_service,
+    user_service,
+    wallet_service,
+)
 from app.services.wallet_service import WalletError
 
 log = logging.getLogger("bot.user.wallet")
@@ -30,6 +40,9 @@ router = Router(name="user.wallet")
 
 CB_TOPUP = "wtopup"
 CB_HISTORY = "whist"
+CB_TU_METHOD = "wtum:"   # top-up method chosen: wtum:<method_type>
+CB_TU_PAID = "wtupaid"   # «پرداخت کردم» on the top-up card screen
+CB_TU_BACK = "wtuback"   # «بازگشت» from the top-up card screen
 
 # Menu buttons that must never be swallowed by the amount/receipt prompts.
 _NAV_TEXTS: set[str] = set()
@@ -217,9 +230,79 @@ async def on_topup_amount(
             await message.answer(_("wallet.topup.error", error=str(exc)))
             return
         cfg = await _read_card_cfg(SettingsService(session))
+        # All active methods for a top-up (a top-up can't be paid FROM the wallet).
+        types = await payment_core_service.resolve_method_types(
+            session, amount, user, exclude_wallet=True)
+    # Remember the request + amount so the method/copy callbacks can read them.
+    await state.set_state(None)
+    await state.update_data(topup_id=topup.id, topup_amount=amount,
+                            pay_amount=amount, card_number=cfg["card_number"])
+
+    # Only manual receipt available (the common default) → skip the extra tap.
+    if not types or types == ["manual_receipt"]:
+        await _show_topup_card(message, amount, topup.id, cfg, _, state)
+        return
+    rows = [[InlineKeyboardButton(text=method_label(_, t), callback_data=f"{CB_TU_METHOD}{t}")]
+            for t in types]
+    await message.answer(_("purchase.choose_method"),
+                         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+async def _show_topup_card(reply, amount: int, topup_id: int, cfg: dict,
+                           _: Callable[..., str], state: FSMContext) -> None:
+    """Show the card-to-card instructions + copy/paid/back buttons for a top-up."""
     await state.set_state(WalletStates.waiting_for_topup_receipt)
-    await state.update_data(topup_id=topup.id)
-    await message.answer("\n".join(_topup_instructions(amount, cfg, _)), parse_mode="HTML")
+    await state.update_data(topup_id=topup_id, pay_amount=amount,
+                            card_number=cfg["card_number"])
+    kb = manual_receipt_keyboard(_, amount=amount, card_number=cfg["card_number"],
+                                 paid_cb=CB_TU_PAID, back_cb=CB_TU_BACK)
+    await reply.answer("\n".join(_topup_instructions(amount, cfg, _)),
+                       parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith(CB_TU_METHOD))
+async def on_topup_method(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """A top-up payment method was chosen from the picker."""
+    method_type = (callback.data or "")[len(CB_TU_METHOD):]
+    data = await state.get_data()
+    topup_id = data.get("topup_id")
+    amount = int(data.get("topup_amount") or 0)
+    if topup_id is None:
+        await callback.answer(_("wallet.topup.no_pending"), show_alert=True)
+        return
+    if method_type in UNIMPLEMENTED_GATEWAY_TYPES:
+        # Never dead-end: clear notice that the gateway isn't wired to a provider.
+        await callback.answer(_("gateway.not_connected"), show_alert=True)
+        return
+    await callback.answer()
+    async with SessionLocal() as session:
+        cfg = await _read_card_cfg(SettingsService(session))
+    if callback.message is not None:
+        await _show_topup_card(callback.message, amount, topup_id, cfg, _, state)
+
+
+@router.callback_query(F.data == CB_TU_PAID)
+async def on_topup_paid(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """«پرداخت کردم» — receipt state is armed; prompt for the file."""
+    await state.set_state(WalletStates.waiting_for_topup_receipt)
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.answer(_("wallet.topup.ask_receipt"))
+
+
+@router.callback_query(F.data == CB_TU_BACK)
+async def on_topup_back(
+    callback: CallbackQuery, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """«بازگشت» from the top-up card screen: leave the receipt-wait state."""
+    await state.clear()
+    await callback.answer()
+    if callback.message is not None:
+        await render_wallet(callback.message, callback.from_user, _)
 
 
 @router.message(WalletStates.waiting_for_amount, F.text, ~F.text.in_(_NAV_TEXTS),
@@ -230,6 +313,20 @@ async def on_topup_amount_wrong(message: Message, _: Callable[..., str]) -> None
 
 @router.message(WalletStates.waiting_for_topup_receipt, F.photo | F.document)
 async def on_topup_receipt(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    """Robust wrapper: any unexpected failure still replies (never stuck)."""
+    try:
+        await _handle_topup_receipt(message, bot, _, state, lang)
+    except Exception as exc:  # noqa: BLE001 - a receipt must never dead-end the user
+        log.exception("Unexpected top-up receipt error: %s", exc)
+        try:
+            await message.answer(_("wallet.topup.receipt_rejected", error="internal"))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _handle_topup_receipt(
     message: Message, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
     from app.bot.handlers.user.orders import _download_telegram_file, _extract_file
