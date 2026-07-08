@@ -19,6 +19,7 @@ from app.models.tutorial import Tutorial, TutorialCategory
 from app.models.coupon import Coupon
 from app.models.coupon_usage import CouponUsage
 from app.models.referral_reward import ReferralReward
+from app.models.backup_job import BackupJob
 
 __all__ = [
     "Base",
@@ -42,4 +43,5 @@ __all__ = [
     "Coupon",
     "CouponUsage",
     "ReferralReward",
+    "BackupJob",
 ]

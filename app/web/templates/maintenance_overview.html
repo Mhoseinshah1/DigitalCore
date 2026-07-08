@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.maint.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>🧰 {{ _("web.maint.title") }}</h1>
+  <p class="muted">{{ _("web.maint.subtitle") }}</p>
+</header>
+{% if saved %}<section class="note ok"><p>{{ _("web.maint.saved") }}</p></section>{% endif %}
+
+<section class="stat-grid">
+  {% if can_backups %}<a class="stat" href="/admin/maintenance/backups">
+    <div class="stat-num">💾</div><div class="stat-label">{{ _("web.maint.card.backups") }}</div></a>{% endif %}
+  {% if can_restore %}<a class="stat" href="/admin/maintenance/restore">
+    <div class="stat-num">♻️</div><div class="stat-label">{{ _("web.maint.card.restore") }}</div></a>{% endif %}
+  {% if can_health %}<a class="stat" href="/admin/maintenance/health">
+    <div class="stat-num">🩺</div><div class="stat-label">{{ _("web.maint.card.health") }}</div></a>{% endif %}
+  <a class="stat" href="/admin/maintenance/system-info">
+    <div class="stat-num">ℹ️</div><div class="stat-label">{{ _("web.maint.card.system") }}</div></a>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">🛠 {{ _("web.maint.mode_title") }}</h2>
+  <div class="status-row">
+    <span>{{ _("web.maint.mode_state") }}</span>
+    {% if maintenance %}<span class="pill warn">{{ _("dash.on") }}</span>
+    {% else %}<span class="pill ok">{{ _("dash.off") }}</span>{% endif %}
+  </div>
+  <form method="post" action="/admin/maintenance/mode" class="mode-form">
+    <label class="muted small">{{ _("web.maint.mode_message") }}
+      <input type="text" name="message" value="{{ maintenance_message }}" maxlength="500">
+    </label>
+    {% if maintenance %}
+      <button class="btn small" name="action" value="disable">{{ _("web.maint.mode_disable") }}</button>
+    {% else %}
+      <button class="btn small warn" name="action" value="enable">{{ _("web.maint.mode_enable") }}</button>
+    {% endif %}
+  </form>
+  <p class="muted small">{{ _("web.maint.mode_hint") }}</p>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">💾 {{ _("web.maint.recent_backups") }}</h2>
+  {% if not recent %}<p class="muted">{{ _("web.maint.no_backups") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>#</th><th>{{ _("web.maint.col.type") }}</th><th>{{ _("web.maint.col.status") }}</th><th>{{ _("web.maint.col.when") }}</th></tr></thead>
+    <tbody>{% for b in recent %}<tr>
+      <td>{% if can_backups %}<a href="/admin/maintenance/backups/{{ b.id }}">#{{ b.id }}</a>{% else %}#{{ b.id }}{% endif %}</td>
+      <td>{{ b.backup_type }}</td>
+      <td><span class="pill {{ 'ok' if b.status=='completed' else ('warn' if b.status in ('failed','deleted') else '') }}">{{ b.status }}</span></td>
+      <td class="muted small">{{ b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "—" }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+{% endblock %}

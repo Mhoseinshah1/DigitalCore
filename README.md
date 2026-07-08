@@ -185,6 +185,69 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   snapshot. **Not** in this phase: reseller, online payment gateway, Marzban /
   Hiddify adapters, backup / restore changes, accounting-grade invoices, external
   BI integrations.
+- **Phase 12 — done.** **Backup, restore + operational maintenance.** Admins
+  create **database / storage / full** backups from `/admin/maintenance/backups`
+  (gzipped, under `storage/backups/YYYY/MM/`, mode `0600`, SHA-256 checksummed);
+  database dumps use **`pg_dump`** in production (password via `PGPASSWORD`,
+  never logged) with a SQLAlchemy fallback for dev/test. Backups are
+  **verifiable** (recompute + compare checksum), **downloadable** (owner/admin
+  only, `no-store`, path-traversal-safe — paths are resolved under
+  `storage/backups` only), and **deletable**; a deleted backup can no longer be
+  downloaded. **Restore is owner-only and confirmation-gated**: the app shows a
+  verified plan, requires a signed time-limited token **and** typing
+  `RESTORE_DIGITALCORE`, takes a **pre-restore backup first**, turns on
+  maintenance mode, restores storage in-app, and — by design, for safety —
+  delegates the destructive database restore to `scripts/restore.sh` on the
+  server. **CLI**: `scripts/backup.sh {database|storage|full}`,
+  `scripts/restore.sh`, `scripts/list_backups.sh`, and an extended
+  `scripts/healthcheck.sh` (DB/Redis/disk/backup-size/recent-errors). A **health
+  / diagnostics** page and a **system-info** page (no secrets) round it out, plus
+  **maintenance-mode** controls and a worker **scheduled-backup + retention
+  cleanup** sweep (off by default; never deletes the latest successful backup).
+  Every action is audited (metadata only). **Not** in this phase: reseller,
+  online payment gateway, Marzban / Hiddify adapters, advanced BI, multi-tenant.
+
+### Phase 12 — backup, restore & maintenance
+
+**Backup** (`app/services/backup_service.py`, `backup_jobs` table, migration
+0018). A `BackupJob` records **metadata only** — type, status, on-disk path
+(under `storage/backups/`), size and SHA-256 — never the backup contents.
+`create_backup_job` / `run_backup_job` orchestrate; `create_database_backup`
+(pg_dump → gzip, SQLAlchemy fallback for dev/test), `create_storage_backup`
+(tar.gz of receipts/tickets/exports/qrcodes/uploads, **excluding**
+`storage/backups`), and `create_full_backup` (db + storage + `metadata.json` +
+`RESTORE.txt`) produce the files at mode `0600`. `verify_backup` recomputes the
+checksum; `cleanup_old_backups` prunes by age but **always keeps the newest
+`backup_keep_last`** and never the single latest. Every `error_message` is
+scrubbed of the DB password and URL credentials before it is stored or logged.
+
+**Restore** (`app/services/restore_service.py`) is deliberately safety-first.
+`validate_backup_file` / `inspect_backup` are read-only (path must resolve under
+`storage/backups`; gzip magic; archive members listed, never extracted blindly).
+`create_restore_plan` returns a plan + warnings + the exact CLI command with no
+side effects. A signed, 10-minute **confirmation token** bound to (admin,
+backup) plus the typed `RESTORE_DIGITALCORE` phrase are both required. The
+guarded entry points verify the token + backup checksum, take a **pre-restore
+backup first**, enable maintenance mode, restore storage in-app (with a
+tar-traversal guard), and delegate the destructive DB overwrite to the CLI.
+
+| Area | Routes / scripts |
+|------|------------------|
+| Web | `GET /admin/maintenance` + `/backups` (`POST /create`, `GET /{id}`, `GET /{id}/download`, `POST /{id}/{verify,delete}`), `GET /restore` (`POST /restore/{plan,confirm}`), `POST /maintenance/mode`, `GET /health`, `GET /system-info` |
+| CLI | `scripts/backup.sh {database\|storage\|full}`, `scripts/restore.sh <file> [--yes]`, `scripts/list_backups.sh`, `scripts/healthcheck.sh` |
+| Worker | hourly sweep: retention cleanup + optional scheduled backup (off by default) |
+
+**Settings** (defaults): `backups_enabled` (true), `backup_download_enabled`
+(true), `scheduled_backups_enabled` (**false**), `scheduled_backup_type` (full),
+`scheduled_backup_hour` (3, UTC), `backup_retention_days` (7), `backup_keep_last`
+(5), `maintenance_message`. **Permissions**: `view_maintenance` + `view_health`
+(owner/admin/support), `manage_backups` + `download_backups` (owner/admin),
+`restore_backups` (**owner only**). **Security**: backups are never served
+publicly (only the auth-gated, `no-store`, traversal-checked download route);
+restore is owner-only, token- and phrase-gated, and makes a rollback backup
+first; audit logs and `error_message`s never contain secrets, the DB URL
+password, or backup contents; `system-info` shows the DB *backend name* only,
+never the URL. Off-site copies should still be encrypted at the storage layer.
 
 ### Phase 11 — reports, analytics & CSV exports
 
@@ -988,6 +1051,30 @@ rows (idempotent; never overwrites custom values).
 11. Confirm `AuditLog` rows exist for `report.viewed` /
     `report.financial_viewed` / `report.export_created` (with the report name +
     date range), and that the exported data itself is **not** in the audit log.
+
+## Phase 12 manual test checklist
+
+1. Log in as **owner** and open `/admin/maintenance`.
+2. Open the **backups** page.
+3. Create a **database** backup, a **storage** backup, and a **full** backup.
+4. **Verify** a backup — confirm the checksum result is OK.
+5. **Download** a backup; confirm the browser saves the `.gz` file and that
+   downloading requires auth (`no-store`, owner/admin only).
+6. Confirm **path traversal is blocked** — a tampered path never serves an
+   arbitrary file (the route returns 404, never `/etc/passwd`).
+7. Open the **restore** page; confirm the strong warning, and that restore
+   requires the owner role, a valid token, and typing `RESTORE_DIGITALCORE`.
+8. On the server, run `bash scripts/backup.sh full`, then
+   `bash scripts/list_backups.sh` and `bash scripts/healthcheck.sh`.
+9. **Enable** maintenance mode from the maintenance page; confirm normal bot/web
+   users see the maintenance notice while admins keep access; then **disable** it.
+10. Confirm `AuditLog` rows exist for `backup_job_created` / `backup_completed` /
+    `backup_downloaded` / `backup_verified` / `backup_deleted` /
+    `restore_plan_created` / `maintenance_mode_enabled` / `health_check_viewed`,
+    and that no secrets (DB URL/password, backup contents) appear in them.
+11. Confirm old-backup cleanup keeps the newest `backup_keep_last` and **never
+    deletes the latest** successful backup; a **deleted** backup can no longer be
+    downloaded (404).
 
 ## CI / GitHub Actions
 

@@ -43,10 +43,36 @@ async def _lifecycle_sweep() -> None:
         log.warning("lifecycle sweep failed: %s", exc)
 
 
+async def _maintenance_sweep() -> None:
+    """Prune old backups + take a scheduled backup if due (Phase 12).
+
+    Off by default; controlled by the scheduled_backup_* / backup_* settings.
+    Never raises — a backup or DB hiccup must not crash the loop.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.services import backup_service
+        async with SessionLocal() as session:
+            result = await backup_service.run_scheduled_maintenance(session)
+        if result.get("acted"):
+            log.info("maintenance sweep: %s", result)
+    except Exception as exc:  # noqa: BLE001 - error isolation: never crash the loop
+        log.warning("maintenance sweep failed: %s", exc)
+
+
+# One maintenance sweep per this many heartbeats (~1 hour at 30s ticks).
+MAINTENANCE_EVERY_TICKS = max(1, 3600 // HEARTBEAT_SECONDS)
+
+
 async def _run(stop: asyncio.Event) -> None:
     log.info("Worker started (tick every %ss).", HEARTBEAT_SECONDS)
+    ticks = 0
+    await _maintenance_sweep()  # once at startup (cheap; cleanup only unless due)
     while not stop.is_set():
         await _lifecycle_sweep()
+        ticks += 1
+        if ticks % MAINTENANCE_EVERY_TICKS == 0:
+            await _maintenance_sweep()
         try:
             # Wake immediately when a shutdown signal arrives, otherwise tick.
             await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SECONDS)
