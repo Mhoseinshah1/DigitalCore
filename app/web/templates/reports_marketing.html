@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.marketing.title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>🏷 {{ _("web.reports.marketing.title") }}</h1><p class="muted">{{ _("web.reports.marketing.subtitle") }}</p></header>
+{% include "reports_filter.html" %}
+{% if coupons_available and coupons.available %}
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(coupons.uses) }}</div><div class="stat-label">🏷 {{ _("web.reports.kpi.coupon_uses") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(coupons.total_discount) }}</div><div class="stat-label">💸 {{ _("web.reports.kpi.total_discount") }}</div></div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">🏷 {{ _("web.reports.marketing.top_coupons") }}</h2>
+  {% if not coupons.top %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>{{ _("web.reports.col.code") }}</th><th>{{ _("web.reports.col.uses") }}</th><th>{{ _("web.reports.col.discount") }}</th></tr></thead>
+    <tbody>{% for c in coupons.top %}<tr><td>{{ c.code }}</td><td>{{ c.uses }}</td><td>{{ "{:,}".format(c.discount) }}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+{% else %}
+<section class="note"><p class="muted">🏷 {{ _("web.reports.marketing.coupons_unavailable") }}</p></section>
+{% endif %}
+
+{% if referrals_available and referrals.available %}
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(referrals.paid_amount) }}</div><div class="stat-label">🎁 {{ _("web.reports.kpi.rewards_paid") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ referrals.pending_count }}</div><div class="stat-label">⏳ {{ _("web.reports.kpi.rewards_pending") }}</div></div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">🎁 {{ _("web.reports.marketing.rewards_by_status") }}</h2>
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>{{ _("web.reports.col.status") }}</th><th>{{ _("web.reports.col.count") }}</th><th>{{ _("web.reports.col.amount") }}</th></tr></thead>
+    <tbody>{% for r in referrals.by_status %}<tr><td>{{ r.status }}</td><td>{{ r.count }}</td><td>{{ "{:,}".format(r.amount) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% else %}
+<section class="note"><p class="muted">🎁 {{ _("web.reports.marketing.referrals_unavailable") }}</p></section>
+{% endif %}
+
+<p class="report-actions">
+  {% if coupons_available %}<a class="btn small" href="/admin/reports/export/coupon-usages.csv?{{ ('preset=' ~ preset) if preset else ('start=' ~ (start or '') ~ '&end=' ~ (end or '')) }}">📤 {{ _("web.reports.export_coupons") }}</a>{% endif %}
+  {% if referrals_available %}<a class="btn small" href="/admin/reports/export/referral-rewards.csv?{{ ('preset=' ~ preset) if preset else ('start=' ~ (start or '') ~ '&end=' ~ (end or '')) }}">📤 {{ _("web.reports.export_referrals") }}</a>{% endif %}
+</p>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.v2ray.title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>🌐 {{ _("web.reports.v2ray.title") }}</h1><p class="muted">{{ _("web.reports.v2ray.subtitle") }}</p></header>
+{% include "reports_filter.html" %}
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ summary.active }}</div><div class="stat-label">🟢 {{ _("web.reports.kpi.active_services") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ summary.total }}</div><div class="stat-label">🌐 {{ _("web.reports.kpi.total_services") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ expiring | length }}</div><div class="stat-label">⏳ {{ _("web.reports.kpi.expiring", days=warn_days) }}</div></div>
+  <div class="stat"><div class="stat-num">{{ (summary.used_bytes / 1073741824) | round(1) }}</div><div class="stat-label">📶 {{ _("web.reports.kpi.used_gb") }}</div></div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">⏳ {{ _("web.reports.v2ray.expiring") }}</h2>
+  {% if not expiring %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>#</th><th>{{ _("web.reports.col.user") }}</th><th>{{ _("web.reports.col.status") }}</th><th>{{ _("web.reports.col.expires") }}</th></tr></thead>
+    <tbody>{% for s in expiring %}<tr><td><a href="/admin/v2ray-services/{{ s.id }}">{{ s.label }}</a></td><td>#{{ s.user_id }}</td><td>{{ s.status }}</td><td class="muted small">{{ s.expire_at[:10] if s.expire_at else "—" }}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+<section class="panel">
+  <h2 class="panel-title">⚠️ {{ _("web.reports.v2ray.problems") }}</h2>
+  {% if not problems %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>#</th><th>{{ _("web.reports.col.user") }}</th><th>{{ _("web.reports.col.status") }}</th></tr></thead>
+    <tbody>{% for s in problems %}<tr><td><a href="/admin/v2ray-services/{{ s.id }}">{{ s.label }}</a></td><td>#{{ s.user_id }}</td><td><span class="pill warn">{{ s.status }}</span></td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+<p class="report-actions"><a class="btn small" href="/admin/reports/export/v2ray-services.csv">📤 {{ _("web.reports.export_v2ray") }}</a></p>
+{% endblock %}

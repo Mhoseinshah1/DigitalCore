@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.exports.title") }}{% endblock %}
+{% block content %}
+<header class="page-head"><h1>📤 {{ _("web.reports.exports.title") }}</h1><p class="muted">{{ _("web.reports.exports.subtitle") }}</p></header>
+{% include "reports_filter.html" %}
+{% set qs = ('preset=' ~ preset) if preset else ('start=' ~ (start or '') ~ '&end=' ~ (end or '')) %}
+<section class="panel">
+  <h2 class="panel-title">📤 {{ _("web.reports.exports.ranged") }}</h2>
+  <div class="export-grid">
+    <a class="btn" href="/admin/reports/export/orders.csv?{{ qs }}">🧾 {{ _("web.reports.export_orders") }}</a>
+    <a class="btn" href="/admin/reports/export/payments.csv?{{ qs }}">💳 {{ _("web.reports.export_payments") }}</a>
+    <a class="btn" href="/admin/reports/export/wallet-transactions.csv?{{ qs }}">👛 {{ _("web.reports.export_wallet") }}</a>
+    <a class="btn" href="/admin/reports/export/users.csv?{{ qs }}">👥 {{ _("web.reports.export_users") }}</a>
+    {% if coupons_available %}<a class="btn" href="/admin/reports/export/coupon-usages.csv?{{ qs }}">🏷 {{ _("web.reports.export_coupons") }}</a>{% endif %}
+    {% if referrals_available %}<a class="btn" href="/admin/reports/export/referral-rewards.csv?{{ qs }}">🎁 {{ _("web.reports.export_referrals") }}</a>{% endif %}
+    {% if tickets_available %}<a class="btn" href="/admin/reports/export/tickets.csv?{{ qs }}">🎫 {{ _("web.reports.export_tickets") }}</a>{% endif %}
+  </div>
+</section>
+<section class="panel">
+  <h2 class="panel-title">📦 {{ _("web.reports.exports.full") }}</h2>
+  <div class="export-grid">
+    <a class="btn" href="/admin/reports/export/products.csv">📦 {{ _("web.reports.export_products") }}</a>
+    <a class="btn" href="/admin/reports/export/licenses.csv">🔑 {{ _("web.reports.export_licenses") }}</a>
+    <a class="btn" href="/admin/reports/export/v2ray-services.csv">🌐 {{ _("web.reports.export_v2ray") }}</a>
+  </div>
+  <p class="muted small">{{ _("web.reports.exports.security_note") }}</p>
+</section>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ _("web.reports.sales.title") }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>💵 {{ _("web.reports.sales.title") }}</h1>
+  <p class="muted">{{ _("web.reports.sales.subtitle") }}</p>
+</header>
+{% include "reports_filter.html" %}
+
+<section class="stat-grid">
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(revenue.total) }}</div>
+    <div class="stat-label">💵 {{ _("web.reports.kpi.revenue") }}
+      {% if revenue.change_pct is not none %}<span class="delta {{ 'up' if revenue.change_pct >= 0 else 'down' }}">{{ revenue.change_pct }}%</span>{% endif %}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(revenue.orders) }}</div><div class="stat-label">✅ {{ _("web.reports.kpi.delivered_orders") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(revenue.avg_order_value) }}</div><div class="stat-label">🧮 {{ _("web.reports.kpi.aov") }}</div></div>
+  <div class="stat"><div class="stat-num">{{ "{:,}".format(revenue.previous_total) }}</div><div class="stat-label">↩️ {{ _("web.reports.kpi.prev_revenue") }}</div></div>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">📈 {{ _("web.reports.sales.by_day") }}</h2>
+  {% set maxrev = (by_day | map(attribute='revenue') | max) if by_day else 0 %}
+  {% if not by_day %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+  <div class="bar-chart">
+    {% for d in by_day %}
+    <div class="bar-col" title="{{ d.date }} · {{ '{:,}'.format(d.revenue) }}">
+      <div class="bar" style="height: {{ ((d.revenue / maxrev * 100) if maxrev else 0) | round(1) }}%"></div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted small">{{ _("web.reports.sales.chart_hint") }}</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">📦 {{ _("web.reports.sales.by_product") }}</h2>
+  {% if not by_product %}<p class="muted">{{ _("web.reports.no_data") }}</p>{% else %}
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>{{ _("web.reports.col.product") }}</th><th>{{ _("web.reports.col.type") }}</th><th>{{ _("web.reports.col.orders") }}</th><th>{{ _("web.reports.col.revenue") }}</th></tr></thead>
+    <tbody>{% for p in by_product %}<tr><td>{{ p.title }}</td><td class="muted small">{{ p.type }}</td><td>{{ p.orders }}</td><td>{{ "{:,}".format(p.revenue) }}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+
+<section class="panel two-col">
+  <div>
+    <h2 class="panel-title">💳 {{ _("web.reports.sales.by_method") }}</h2>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.method") }}</th><th>{{ _("web.reports.col.orders") }}</th><th>{{ _("web.reports.col.revenue") }}</th></tr></thead>
+      <tbody>{% for m in by_method %}<tr><td>{{ m.method }}</td><td>{{ m.orders }}</td><td>{{ "{:,}".format(m.revenue) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div>
+    <h2 class="panel-title">🗂 {{ _("web.reports.sales.by_type") }}</h2>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>{{ _("web.reports.col.type") }}</th><th>{{ _("web.reports.col.orders") }}</th><th>{{ _("web.reports.col.revenue") }}</th></tr></thead>
+      <tbody>{% for t in by_type %}<tr><td>{{ t.type }}</td><td>{{ t.orders }}</td><td>{{ "{:,}".format(t.revenue) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+</section>
+
+<p class="report-actions"><a class="btn small" href="/admin/reports/export/orders.csv?{{ ('preset=' ~ preset) if preset else ('start=' ~ (start or '') ~ '&end=' ~ (end or '')) }}">📤 {{ _("web.reports.export_orders") }}</a></p>
+{% endblock %}

@@ -285,3 +285,34 @@ table.kv td { padding: .35rem 0; }
 /* Phase 3: order detail panel headings */
 .panel-title { margin: 0 0 .6rem; font-size: 1.02rem; font-weight: 700; }
 .panel-subtitle { margin: 1rem 0 .4rem; font-size: .92rem; font-weight: 600; opacity: .9; }
+
+/* ------------------------------------------------------------------ */
+/* Phase 11 — reports & analytics                                     */
+/* ------------------------------------------------------------------ */
+.report-filter { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem;
+  align-items: center; justify-content: space-between; }
+.report-presets { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chip { display: inline-block; padding: .28rem .7rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  font-size: .82rem; }
+.chip:hover { border-color: var(--accent); text-decoration: none; color: var(--text); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.report-range { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
+.report-range label { display: flex; flex-direction: column; font-size: .72rem;
+  color: var(--muted); gap: .2rem; }
+.report-range input[type=date] { background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: .3rem .5rem; }
+.delta { font-size: .72rem; padding: 0 .35rem; border-radius: 999px; margin-inline-start: .3rem; }
+.delta.up { color: #b6f0cf; border: 1px solid var(--ok); }
+.delta.down { color: #ffc6cc; border: 1px solid var(--err); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } }
+.bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 140px;
+  padding: .5rem 0; overflow-x: auto; }
+.bar-col { flex: 1 0 6px; min-width: 6px; height: 100%; display: flex; align-items: flex-end; }
+.bar { width: 100%; min-height: 2px; background: var(--accent); border-radius: 3px 3px 0 0; }
+.bar-col:hover .bar { background: var(--accent-2, #7db0ff); }
+.export-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: .6rem; }
+.export-grid .btn { text-align: center; }
+.report-actions { margin: 1rem 0 1.5rem; display: flex; flex-wrap: wrap; gap: .5rem; }
