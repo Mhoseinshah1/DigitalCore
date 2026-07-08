@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -35,10 +35,24 @@ class XuiServer(Base, TimestampMixin):
 
     panel_type: Mapped[str] = mapped_column(String(32), default="3x-ui", nullable=False)
     panel_version: Mapped[str] = mapped_column(String(32), default="2.9.4", nullable=False)
+    # Populated by the connection test (best-effort; never guessed).
+    xray_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Preferred auth mode: "api_token" (Bearer) or "password" (cookie login).
+    auth_mode: Mapped[str] = mapped_column(
+        String(16), default="password", server_default="password", nullable=False
+    )
     username: Mapped[str | None] = mapped_column(String(120), nullable=True)
     encrypted_password: Mapped[str | None] = mapped_column(Text, nullable=True)
     encrypted_api_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Verify TLS certs (turn off only for self-signed panels) + per-server timeout.
+    tls_verify: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    timeout_seconds: Mapped[int] = mapped_column(
+        Integer, default=20, server_default="20", nullable=False
+    )
 
     status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
     # Admin on/off switch, independent of the health `status`.

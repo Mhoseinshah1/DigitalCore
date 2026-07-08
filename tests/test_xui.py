@@ -239,8 +239,12 @@ async def test_test_connection_online(db_session) -> None:
     server = await _make_server(db_session)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/login"):
+        path = request.url.path
+        if path.endswith("/login"):
             return _login_ok()
+        if path.endswith("/panel/api/inbounds/list"):
+            return _envelope([{"id": 1, "remark": "in", "protocol": "vless", "port": 443}])
+        # server/status is best-effort — 404 here proves the tolerant path.
         return httpx.Response(404)
 
     result = await xui_service.test_connection(
@@ -248,6 +252,7 @@ async def test_test_connection_online(db_session) -> None:
     )
     assert result["ok"] is True
     assert result["status"] == "online"
+    assert result["inbound_count"] == 1
     assert server.status == "online"
     assert server.last_health_check is not None
 

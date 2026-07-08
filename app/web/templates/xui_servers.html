@@ -38,6 +38,11 @@
           <td>
             {% if s.status in ("active", "online") %}<span class="pill ok">{{ _("xui.status." ~ s.status) }}</span>
             {% else %}<span class="pill">{{ _("xui.status." ~ s.status) }}</span>{% endif %}
+            <div class="muted small">
+              🔑 {{ _("web.xui.servers.auth_mode." ~ (s.auth_mode or "password")) }}
+              {% if s.panel_version %} · v{{ s.panel_version }}{% endif %}
+              {% if s.xray_version %} · xray {{ s.xray_version }}{% endif %}
+            </div>
             {% if s.last_error %}<div class="muted small" title="{{ s.last_error }}">⚠️ {{ s.last_error|truncate(60) }}</div>{% endif %}
           </td>
           <td>

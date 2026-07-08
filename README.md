@@ -215,6 +215,77 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   working **«حساب من» (My Account)** page; the **rules** moved off the menu and
   shown on `/start`; a restructured main menu; and a **configurable license
   section title**. See **Bot UX — categories, invoice, account & receipts** below.
+- **Sanaei 3X-UI integration rebuild — done.** The panel client was rebuilt from
+  the Sanaei (MHSanaei/3x-ui) API: a clean async `SanaeiApiClient` with
+  **Bearer API-token auth preferred** and cookie login as a fallback, safe
+  (secret-free) logging, retries on transient failures, per-server TLS-verify and
+  timeout, a rich **connection test** (auth + server status + inbounds), robust
+  **inbound sync** that upserts and never deletes, and a **dry-run product
+  validator**. See **Sanaei 3X-UI integration** below.
+
+### Sanaei 3X-UI integration
+
+The single client the app uses to reach a panel is
+`app/services/sanaei_api_client.py` (`SanaeiApiClient`), with
+`app/services/sanaei_adapter.py` building one from a stored `XuiServer`
+(decrypting credentials, choosing the auth mode). Every panel endpoint path is a
+named constant in one place.
+
+**Authentication.** Two modes, chosen per server (`xui_servers.auth_mode`):
+
+- **`api_token` (preferred).** A Bearer token is sent as
+  `Authorization: Bearer <token>` on every request; no login round-trip. The
+  token is a full-admin credential — stored **Fernet-encrypted**
+  (`encrypted_api_token`) and never logged, rendered, or put in audit metadata.
+- **`password` (fallback).** Username + password cookie login against
+  `POST {base}{web_base_path}/login`, with one automatic re-login on a 401 /
+  expired-session (a non-JSON HTML body is treated as an expired session).
+
+`web_base_path` is honoured for panels served under a custom path. `tls_verify`
+can be turned **off** only for self-signed panels; `timeout_seconds` is
+per-server.
+
+**Endpoints.** New `/panel/api/clients/*` (add/update/del) are tried first and
+the client **falls back to the legacy `/panel/api/inbounds/*` flow on a 404**, so
+both current and older Sanaei builds work. Reads use
+`/panel/api/inbounds/list`, `/panel/api/inbounds/{id}`,
+`/panel/api/inbounds/allLinks` and best-effort `/panel/api/server/status`
+(for panel / xray version). Panel conventions are respected: **`expiryTime` in
+milliseconds**, **`totalGB` in bytes** (despite the name), **email is the unique
+client id**, and the panel-generated **`uuid` / `subId` are always adopted and
+stored** rather than the locally-generated ones.
+
+**Data model** (migration `0020_xui_auth_and_inbound_sync`, additive only —
+existing rows keep working). `xui_servers` gains `auth_mode` (default
+`password`), `tls_verify` (default on), `timeout_seconds` (default 20) and
+`xray_version`. `xui_inbounds` gains `tag`, `enable_from_panel`, `raw_json` and
+`synced_at`. Existing subscription fields (`public_sub_base_url`,
+`subscription_path`) are reused.
+
+**Admin.** The server form (`/admin/xui-servers/create` · `…/{id}/edit`) exposes
+the auth method, API token, username/password (**blank keeps the stored secret**,
+with a *configured / not set* badge), web base path, subscription base URL + path,
+TLS-verify and timeout. **Test** and **Sync inbounds** run against the live panel
+and record status / last error / panel + xray version (shown on the server list).
+Inbound sync is an **idempotent upsert that never deletes** an inbound missing
+from the panel.
+
+**Validate a product before selling it.** From a V2Ray product's edit page,
+**🔍 Validate binding** (`/admin/products/{id}/validate-binding`) runs a
+**dry run** — it checks the product is bound to an active server + inbound, has a
+duration + traffic quota, the server has credentials and a subscription host —
+**without provisioning anything**. Add `?live=1` (the *Run live connection test*
+button) to also probe auth + status + inbounds.
+
+**Provisioning & lifecycle** stay idempotent: a deterministic client email
+(`dc-u{user}-o{order}`), `find_client` before add so a retry after a partial run
+repairs the local row instead of creating a second panel client, verify-after-
+write on every change, and subscription links built only from a configured
+`public_sub_base_url` (never guessed from the admin `base_url`).
+
+**CLI.** `python scripts/test_xui_connection.py --server-id <id>` (or `--all`,
+optionally `--sync`) prints a secret-free reachability report for a stored
+server — handy for verifying a newly-added panel from the backend container.
 
 ### Bot UX — categories, invoice, account & receipts
 

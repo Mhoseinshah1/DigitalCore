@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
 from app.models.order import Order
+from app.models.product import Product
 from app.models.v2ray_service import V2RayService
 from app.models.xui_inbound import XuiInbound
 from app.models.xui_server import XuiServer
@@ -224,6 +225,77 @@ async def _resolve_targets(session: AsyncSession, order) -> tuple[object, XuiSer
     if not inbound.is_active:
         raise V2RayError("xui inbound is inactive", code="inbound_inactive")
     return product, server, inbound
+
+
+async def dry_run_validate_product(
+    session: AsyncSession, product_id: int, *, test_connection: bool = False,
+    transport=None, sleep=None,
+) -> dict:
+    """Validate a product's 3X-UI binding WITHOUT provisioning anything.
+
+    Runs every check `provision_service_for_order` would run up front (product is
+    v2ray, bound to an active server+inbound, duration/traffic set, credentials
+    present, subscription host configured) and returns a structured report the
+    admin UI can render. When `test_connection` is set it additionally performs a
+    live auth + status + inbounds probe. Never raises; a missing product returns
+    ``ok=False`` with a single failing check. No secret is ever included.
+    """
+    checks: list[dict] = []
+
+    def _add(key: str, ok: bool, detail: str = "") -> bool:
+        checks.append({"check": key, "ok": bool(ok), "detail": detail})
+        return ok
+
+    product = await session.get(Product, product_id)
+    if product is None:
+        return {"ok": False, "product_id": product_id,
+                "checks": [{"check": "product_exists", "ok": False, "detail": "not found"}]}
+
+    _add("product_is_v2ray", product.type == "v2ray", f"type={product.type}")
+    bound = bool(product.xui_server_id and product.xui_inbound_id)
+    _add("product_bound", bound, "server+inbound required" if not bound else "")
+    _add("duration_set", bool(product.duration_days and int(product.duration_days) > 0),
+         f"duration_days={product.duration_days}")
+    _add("traffic_set", product.traffic_gb is not None and int(product.traffic_gb) >= 0,
+         f"traffic_gb={product.traffic_gb}")
+
+    server = inbound = None
+    if bound:
+        server = await session.get(XuiServer, product.xui_server_id)
+        _add("server_exists", server is not None)
+        if server is not None:
+            _add("server_active", server.is_active, "" if server.is_active else "inactive")
+            has_creds = bool(
+                server.encrypted_api_token
+                or (server.username and server.encrypted_password)
+            )
+            _add("credentials_present", has_creds,
+                 "no api token or username/password" if not has_creds else "")
+            _add("subscription_host_configured", bool(server.public_sub_base_url),
+                 "public_sub_base_url is not set — links can't be generated"
+                 if not server.public_sub_base_url else "")
+        inbound = await session.get(XuiInbound, product.xui_inbound_id)
+        _add("inbound_exists", inbound is not None)
+        if inbound is not None and server is not None:
+            _add("inbound_belongs_to_server", inbound.server_id == server.id)
+            _add("inbound_active", inbound.is_active, "" if inbound.is_active else "inactive")
+
+    result: dict = {
+        "ok": all(c["ok"] for c in checks),
+        "product_id": product_id,
+        "server_id": product.xui_server_id,
+        "inbound_id": product.xui_inbound_id,
+        "checks": checks,
+    }
+
+    if test_connection and server is not None:
+        diag = await xui_service.test_connection(
+            session, server, transport=transport, sleep=sleep
+        )
+        result["connection"] = diag
+        result["ok"] = result["ok"] and bool(diag.get("ok"))
+
+    return result
 
 
 async def provision_service_for_order(

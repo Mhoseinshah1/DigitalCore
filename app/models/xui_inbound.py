@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -28,7 +30,15 @@ class XuiInbound(Base, TimestampMixin):
     port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     network: Mapped[str | None] = mapped_column(String(32), nullable=True)
     security: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Whether the inbound is enabled on the panel (mirror of the panel's `enable`).
+    enable_from_panel: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    # Full inbound JSON from the last sync (diagnostic) + when it was synced.
+    raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     server: Mapped["XuiServer"] = relationship("XuiServer", back_populates="inbounds")
 

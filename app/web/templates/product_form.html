@@ -152,6 +152,11 @@
   <div class="form-actions">
     <button type="submit" class="btn primary">{{ _("web.products.form.save") }}</button>
     <a class="btn" href="/admin/products">{{ _("web.products.form.cancel") }}</a>
+    {% if product and product.type == "v2ray" %}
+    <a class="btn" href="/admin/products/{{ product.id }}/validate-binding">
+      🔍 {{ _("web.products.validate.title") }}
+    </a>
+    {% endif %}
   </div>
 </form>
 

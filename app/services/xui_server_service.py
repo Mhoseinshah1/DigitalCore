@@ -32,6 +32,13 @@ def _now() -> datetime:
 # --------------------------------------------------------------------------
 # Servers
 # --------------------------------------------------------------------------
+def _resolve_auth_mode(auth_mode: str | None, api_token: str | None,
+                       username: str | None) -> str:
+    if auth_mode in ("api_token", "password"):
+        return auth_mode
+    return "api_token" if (api_token or "").strip() else "password"
+
+
 async def create_server(
     session: AsyncSession,
     *,
@@ -40,17 +47,31 @@ async def create_server(
     username: str | None = None,
     password: str | None = None,
     api_token: str | None = None,
+    auth_mode: str | None = None,
+    web_base_path: str | None = None,
+    public_sub_base_url: str | None = None,
+    subscription_path: str | None = None,
+    tls_verify: bool = True,
+    timeout_seconds: int = 20,
     is_active: bool = True,
     actor_id: int | None = None,
 ) -> XuiServer:
     if not (name or "").strip() or not (base_url or "").strip():
         raise ValueError("name and base_url are required")
+    # Credentials may be filled in later; the connection test reports what's missing.
+    mode = _resolve_auth_mode(auth_mode, api_token, username)
     server = XuiServer(
         name=name.strip(),
         base_url=base_url.strip().rstrip("/"),
+        web_base_path=(web_base_path or "").strip().strip("/") or None,
+        auth_mode=mode,
         username=(username or "").strip() or None,
         encrypted_password=crypto.encrypt(password) if password else None,
         encrypted_api_token=crypto.encrypt(api_token) if api_token else None,
+        public_sub_base_url=(public_sub_base_url or "").strip().rstrip("/") or None,
+        subscription_path=(subscription_path or "").strip() or None,
+        tls_verify=bool(tls_verify),
+        timeout_seconds=int(timeout_seconds or 20),
         status="unknown",
         is_active=is_active,
     )
@@ -74,6 +95,12 @@ async def update_server(
     username: str | None = None,
     password: str | None = None,
     api_token: str | None = None,
+    auth_mode: str | None = None,
+    web_base_path: str | None = None,
+    public_sub_base_url: str | None = None,
+    subscription_path: str | None = None,
+    tls_verify: bool | None = None,
+    timeout_seconds: int | None = None,
     is_active: bool | None = None,
     actor_id: int | None = None,
 ) -> XuiServer | None:
@@ -85,12 +112,24 @@ async def update_server(
         server.name = name.strip()
     if base_url is not None:
         server.base_url = base_url.strip().rstrip("/")
+    if web_base_path is not None:
+        server.web_base_path = web_base_path.strip().strip("/") or None
     if username is not None:
         server.username = username.strip() or None
     if password:  # only overwrite when a new non-empty password is supplied
         server.encrypted_password = crypto.encrypt(password)
     if api_token:
         server.encrypted_api_token = crypto.encrypt(api_token)
+    if auth_mode in ("api_token", "password"):
+        server.auth_mode = auth_mode
+    if public_sub_base_url is not None:
+        server.public_sub_base_url = public_sub_base_url.strip().rstrip("/") or None
+    if subscription_path is not None:
+        server.subscription_path = subscription_path.strip() or None
+    if tls_verify is not None:
+        server.tls_verify = bool(tls_verify)
+    if timeout_seconds is not None:
+        server.timeout_seconds = int(timeout_seconds or 20)
     if is_active is not None:
         server.is_active = is_active
     await audit_service.log(
@@ -260,32 +299,23 @@ async def deactivate_inbound(
 async def test_connection(
     session: AsyncSession, server_id: int, *, actor_id: int | None = None, transport=None
 ) -> dict[str, object]:
-    """Log in to the panel; record status=active on success, error otherwise."""
+    """Rich connection test (auth + server status + inbounds) via the Sanaei client."""
     from app.services import xui_service  # local import keeps httpx off the import path
-    from app.xui.exceptions import XuiError
 
     server = await get_server(session, server_id)
     if server is None:
         return {"ok": False, "status": "unknown", "message": "server not found"}
 
-    adapter = xui_service.build_adapter(server, transport=transport)
-    try:
-        await adapter.login()
-        status, ok, message = "active", True, "connected"
-    except XuiError as exc:
-        status, ok, message = "error", False, str(exc)
-    finally:
-        await adapter.aclose()
-
-    server.status = status
-    server.last_error = None if ok else message
-    server.last_health_check = _now()
+    # Rich test via the Sanaei client (auth + server status + inbounds). It also
+    # records status / last_error / panel+xray version on the server row.
+    result = await xui_service.test_connection(session, server, transport=transport)
     await audit_service.log(
         session, actor_type="admin", actor_id=actor_id,
         action="xui_server_tested", target_type="xui_server", target_id=server.id,
-        new=f"status={status}",  # no credentials
+        new=f"status={result.get('status')}",  # no credentials
     )
-    return {"ok": ok, "status": status, "message": message}
+    await session.commit()
+    return result
 
 
 async def sync_inbounds(
