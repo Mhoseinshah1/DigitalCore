@@ -28,6 +28,12 @@ class Product(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional grouping for the bot's category-first browse flow (bot UX phase).
+    # NULL = uncategorised; the bot shows those under a synthetic "سایر محصولات".
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_categories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Integer toman.
     price: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 

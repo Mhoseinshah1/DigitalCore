@@ -89,20 +89,15 @@ def _detail_keyboard(svc, _: Callable[..., str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("my_services"))
-@router.message(F.text.in_(texts_for("btn.my_services")))
-async def on_my_services(
-    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
-) -> None:
-    await state.clear()
-    tg_user = message.from_user
+async def render_services(reply, tg_user, _: Callable[..., str], lang: str) -> None:
+    """Render the caller's services. Shared by /my_services and the account page."""
     async with SessionLocal() as session:
         user = await user_service.get_by_telegram_id(session, tg_user.id)
         services = await v2ray_service.list_user_services(session, user.id) if user else []
     services = [s for s in services if s.status != "deleted"]
 
     if not services:
-        await message.answer(_("services.user.empty"))
+        await reply.answer(_("services.user.empty"))
         return
 
     lines = [_("services.user.title"), ""]
@@ -113,10 +108,19 @@ async def on_my_services(
         lines.append(_("services.user.row", title=title,
                        status=_("service.status." + svc.status), expire=expire))
         buttons.append([InlineKeyboardButton(text=title, callback_data=f"{CB_SERVICE}{svc.id}")])
-    await message.answer(
+    await reply.answer(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
+
+
+@router.message(Command("my_services"))
+@router.message(F.text.in_(texts_for("btn.my_services")))
+async def on_my_services(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    await state.clear()
+    await render_services(message, message.from_user, _, lang)
 
 
 @router.callback_query(F.data.startswith(CB_SERVICE))

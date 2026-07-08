@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import PRODUCT_ACTION_TYPES, PRODUCT_TYPES, Product
+from app.models.product_category import ProductCategory
 from app.models.xui_inbound import XuiInbound
 from app.models.xui_server import XuiServer
 from app.schemas.product import ProductCreate, ProductUpdate
@@ -22,6 +23,7 @@ _EDITABLE_FIELDS = (
     "title",
     "description",
     "price",
+    "category_id",
     "duration_days",
     "traffic_gb",
     "ip_limit",
@@ -124,6 +126,15 @@ async def validate_xui_binding(
         raise ValueError("an active V2Ray product needs an active server and inbound")
 
 
+async def validate_category(session: AsyncSession, category_id: int | None) -> None:
+    """A product may reference no category (None) or an existing one. Raises ValueError."""
+    if category_id is None:
+        return
+    category = await session.get(ProductCategory, category_id)
+    if category is None:
+        raise ValueError("selected category does not exist")
+
+
 async def get(session: AsyncSession, product_id: int) -> Product | None:
     return await session.get(Product, product_id)
 
@@ -182,11 +193,13 @@ async def create(
             session, data.type, data.xui_server_id, data.xui_inbound_id,
             is_active=data.is_active,
         )
+    await validate_category(session, data.category_id)
     product = Product(
         type=data.type,
         title=data.title.strip(),
         description=data.description,
         price=int(data.price),
+        category_id=data.category_id,
         duration_days=data.duration_days,
         traffic_gb=data.traffic_gb,
         ip_limit=data.ip_limit,
@@ -272,6 +285,8 @@ async def update(
             session, merged["type"], merged["xui_server_id"], merged["xui_inbound_id"],
             is_active=bool(merged["is_active"]),
         )
+    if "category_id" in changes:
+        await validate_category(session, changes["category_id"])
 
     old_parts: list[str] = []
     new_parts: list[str] = []

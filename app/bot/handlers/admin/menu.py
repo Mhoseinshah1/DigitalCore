@@ -9,7 +9,7 @@ from aiogram.types import Message
 
 from app.bot.handlers.admin.panel import build_overview
 from app.bot.keyboards.admin import admin_main_menu
-from app.bot.keyboards.user import user_main_menu
+from app.bot.keyboards.user import user_main_menu_async
 from app.core.permissions import Role, has_permission
 from app.i18n import texts_for
 

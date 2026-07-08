@@ -160,6 +160,13 @@ DEFAULTS: list[SettingDef] = [
                description="Allow manual card-to-card payments.",
                label_fa="فعال‌بودن کارت‌به‌کارت",
                description_fa="اجازه پرداخت دستی کارت‌به‌کارت."),
+    SettingDef("online_gateway_enabled", "payment", "bool", default="false",
+               label="Online payment gateway enabled",
+               description="Show the online-gateway payment button. When off the bot "
+                           "shows a 'coming soon' notice; no real gateway is integrated yet.",
+               label_fa="فعال‌بودن درگاه پرداخت آنلاین",
+               description_fa="نمایش دکمهٔ پرداخت با درگاه آنلاین. در حالت خاموش، ربات پیام "
+                              "«به‌زودی» نشان می‌دهد؛ هنوز درگاه واقعی متصل نشده است."),
     SettingDef("allow_negative_wallet", "payment", "bool", default="false",
                label="Allow negative wallet",
                description="Permit admin wallet debits to push a balance below zero.",
@@ -325,6 +332,15 @@ DEFAULTS: list[SettingDef] = [
                description="Rules / terms shown to users.",
                label_fa="پیام قوانین",
                description_fa="قوانین/شرایطی که به کاربران نمایش داده می‌شود."),
+    SettingDef("license_section_title", "texts", "string",
+               default="لایسنس‌های من",
+               label="License section title",
+               description="Title of the user's license section (main-menu button, "
+                           "/my_licenses header, and empty state). Set to e.g. "
+                           "'اپل آیدی‌های من' to rebrand it for Apple IDs.",
+               label_fa="عنوان بخش لایسنس‌ها",
+               description_fa="عنوان بخش لایسنس‌های کاربر (دکمهٔ منوی اصلی، عنوان "
+                              "/my_licenses و حالت خالی). مثلاً «اپل آیدی‌های من»."),
     SettingDef("blocked_user_text", "texts", "text",
                label="Blocked-user message",
                description="Shown to a blocked user instead of the normal menu.",

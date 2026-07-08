@@ -48,6 +48,13 @@ def _card_cfg(cfg: dict) -> bool:
     return bool(cfg.get("card_number"))
 
 
+def _topup_receipt_error_text(exc: "payment_service.ReceiptError", _: Callable[..., str]) -> str:
+    """Map a ReceiptError.code to a specific Persian message, else a generic one."""
+    key = f"wallet.topup.receipt.{exc.code}"
+    text = _(key)
+    return text if text != key else _("wallet.topup.receipt_rejected", error=str(exc))
+
+
 async def _read_card_cfg(svc: SettingsService) -> dict[str, str]:
     return {
         "card_number": (await svc.get_str("card_number", "")).strip(),
@@ -64,18 +71,22 @@ def _wallet_menu_kb(_: Callable[..., str]) -> InlineKeyboardMarkup:
     ])
 
 
-async def _show_wallet(message: Message, _: Callable[..., str]) -> None:
-    tg = message.from_user
+async def render_wallet(reply, tg_user, _: Callable[..., str]) -> None:
+    """Show the wallet balance + menu. Shared by /wallet and the account page."""
     async with SessionLocal() as session:
         if not await wallet_service.wallet_enabled(session):
-            await message.answer(_("wallet.disabled"))
+            await reply.answer(_("wallet.disabled"))
             return
-        user = await user_service.get_by_telegram_id(session, tg.id)
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
         balance = int(user.wallet_balance or 0) if user else 0
-    await message.answer(
+    await reply.answer(
         f"{_('wallet.title')}\n\n{_('wallet.balance', amount=f'{balance:,}')}",
         parse_mode="HTML", reply_markup=_wallet_menu_kb(_),
     )
+
+
+async def _show_wallet(message: Message, _: Callable[..., str]) -> None:
+    await render_wallet(message, message.from_user, _)
 
 
 @router.message(Command("wallet"))
@@ -231,7 +242,7 @@ async def on_topup_receipt(
     try:
         payment_service.precheck_receipt(original_name, size, mime)
     except payment_service.ReceiptError as exc:
-        await message.answer(_("wallet.topup.receipt_rejected", error=str(exc)))
+        await message.answer(_topup_receipt_error_text(exc, _))
         return
     tg = message.from_user
     async with SessionLocal() as session:
@@ -250,11 +261,18 @@ async def on_topup_receipt(
         try:
             topup = await wallet_service.submit_topup_receipt(session, topup_id, user.id, fi)
             await session.commit()
-        except (payment_service.ReceiptError, WalletError) as exc:
+        except payment_service.ReceiptError as exc:
+            await message.answer(_topup_receipt_error_text(exc, _))
+            return
+        except WalletError as exc:
             await message.answer(_("wallet.topup.receipt_rejected", error=str(exc)))
             return
+        amount = int(topup.amount or 0)
+        topup_num = topup.id
+    # Move the FSM forward immediately so the user is never left waiting.
     await state.clear()
-    await message.answer(_("wallet.topup.receipt_saved"))
+    await message.answer(
+        _("wallet.topup.receipt_saved_detail", amount=f"{amount:,}", topup_id=topup_num))
     # Best-effort admin notification.
     try:
         from app.bot.notifications import notify_wallet_topup_submitted
@@ -266,4 +284,15 @@ async def on_topup_receipt(
 @router.message(WalletStates.waiting_for_topup_receipt, F.text,
                 ~F.text.startswith("/"), ~F.text.in_(_NAV_TEXTS))
 async def on_topup_receipt_wrong(message: Message, _: Callable[..., str]) -> None:
+    await message.answer(_("wallet.topup.receipt_required_file"))
+
+
+@router.message(WalletStates.waiting_for_topup_receipt,
+                ~F.text.startswith("/"), ~F.text.in_(_NAV_TEXTS))
+async def on_topup_receipt_catch_all(message: Message, _: Callable[..., str]) -> None:
+    """Anything else while waiting for a receipt (sticker, voice, contact, empty
+    forward…): reply with guidance so the flow is never silently stuck.
+
+    Commands and main-menu buttons are excluded so navigation still works — those
+    fall through to their own routers (which may be registered after this one)."""
     await message.answer(_("wallet.topup.receipt_required_file"))

@@ -11,6 +11,7 @@ from app.bot.handlers.admin import settings as admin_settings
 from app.bot.handlers.admin import tickets as admin_tickets
 from app.bot.handlers.admin import wallet as admin_wallet
 from app.bot.handlers.admin import xui as admin_xui
+from app.bot.handlers.user import account as user_account
 from app.bot.handlers.user import language as user_language
 from app.bot.handlers.user import orders as user_orders
 from app.bot.handlers.user import products as user_products
@@ -59,6 +60,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(user_language.router)
     dp.include_router(user_start.router)
     dp.include_router(user_rules.router)
+    dp.include_router(user_account.router)
     dp.include_router(user_products.router)
     # Wallet + tickets before orders: their state-filtered photo/document handlers
     # must win over the orders stateless receipt handler.
