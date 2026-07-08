@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{% if category %}{{ _("web.products.categories.edit_title") }}{% else %}{{ _("web.products.categories.create_title") }}{% endif %}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% if category %}{{ _("web.products.categories.edit_title") }}{% else %}{{ _("web.products.categories.create_title") }}{% endif %}</h1>
+  <p class="muted"><a href="/admin/product-categories">{{ _("web.products.categories.back") }}</a></p>
+</header>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form method="post"
+      action="{% if category %}/admin/product-categories/{{ category.id }}/edit{% else %}/admin/product-categories/create{% endif %}"
+      class="settings-form">
+  <section class="panel">
+    <div class="fields">
+      <div class="field">
+        <label for="title">{{ _("web.products.categories.form.title") }}</label>
+        <input id="title" name="title" type="text" required
+               value="{{ category.title if category else '' }}">
+      </div>
+      <div class="field field-text">
+        <label for="description">{{ _("web.products.categories.form.description") }}</label>
+        <textarea id="description" name="description" rows="3">{{ category.description or '' if category else '' }}</textarea>
+      </div>
+      <div class="field">
+        <label for="sort_order">{{ _("web.products.categories.form.sort_order") }}</label>
+        <input id="sort_order" name="sort_order" type="number"
+               value="{{ category.sort_order if category else 0 }}">
+      </div>
+      <div class="field field-bool">
+        <label class="switch">
+          <input type="checkbox" name="is_active" {% if not category or category.is_active %}checked{% endif %}>
+          <span class="switch-track"></span>
+          <span class="switch-label">{{ _("web.products.categories.form.is_active") }}</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <button type="submit" class="btn primary">{{ _("web.products.categories.form.save") }}</button>
+    <a class="btn" href="/admin/product-categories">{{ _("web.products.categories.form.cancel") }}</a>
+  </div>
+</form>
+{% endblock %}

@@ -206,6 +206,70 @@ path now `301`-redirects to `/admin/xui-servers`. Audited actions:
   cleanup** sweep (off by default; never deletes the latest successful backup).
   Every action is audited (metadata only). **Not** in this phase: reseller,
   online payment gateway, Marzban / Hiddify adapters, advanced BI, multi-tenant.
+- **Bot UX pass — done.** A user-experience fix pass for the Telegram bot (no new
+  business domain): **product categories** so the bot shows *categories first →
+  products in a category → a per-order pre-invoice* (پیش‌فاکتور) with wallet /
+  card-to-card / gateway payment buttons; a **wallet top-up receipt fix** (any
+  photo / PDF / image is accepted, the user always gets a detailed confirmation
+  with the amount + request number, and no message type leaves the flow stuck); a
+  working **«حساب من» (My Account)** page; the **rules** moved off the menu and
+  shown on `/start`; a restructured main menu; and a **configurable license
+  section title**. See **Bot UX — categories, invoice, account & receipts** below.
+
+### Bot UX — categories, invoice, account & receipts
+
+**Product categories** (`app/models/product_category.py`, `product_categories`
+table, migration 0019). A `ProductCategory` is a simple admin-managed grouping
+(`title`, unique `slug`, `description`, `sort_order`, `is_active`); `Product`
+gains a nullable `category_id` (FK, `ON DELETE SET NULL`) — existing products
+stay uncategorised, so **no data backfill** is needed. Admin CRUD lives at
+`GET/POST /admin/product-categories`, `…/create`, `…/{id}/edit`,
+`…/{id}/toggle-active`; the product form gains a **category dropdown** (allow
+none, validated against existing categories) and the product list shows the
+category. `product_category_service.grouped_for_bot` groups **active** categories
+that have **active, non-hidden, non-service-action** products (sorted by
+`sort_order` then title), and collects every browsable product whose category is
+NULL / inactive / deleted under a synthetic **«سایر محصولات» (Other)** group so
+no purchasable product is ever orphaned.
+
+**Bot product flow** (`app/bot/handlers/user/products.py`). *Products* now opens
+a **category picker**; tapping a category lists its products (with a *back to
+categories* button); tapping a product shows a **pre-invoice** — product, category,
+description, price, and (for V2Ray) duration / traffic / IP / server — plus the
+enabled **payment buttons**: *pay from wallet*, *card-to-card*, and *pay via
+gateway*. When only the Other group exists (an operator that never sets up
+categories), the bot skips straight to the flat product list — the old
+experience. The **online gateway is a placeholder** gated by
+`online_gateway_enabled` (default off): the button is shown only when enabled and
+leads to a “coming soon” notice — **no real gateway is integrated**. Coupons and
+the existing wallet / card charge paths are reused unchanged.
+
+**Wallet top-up receipt fix** (`app/bot/handlers/user/wallet.py`). A submitted
+receipt (photo, image, or **PDF/document**) is accepted, validated
+(type/size → clear Persian errors), stored, and the top-up moves to
+`waiting_admin`; the user immediately gets a **detailed confirmation** (“✅ رسید
+شارژ کیف پول دریافت شد … مبلغ … شمارهٔ درخواست …”). The FSM is cleared so the flow
+moves forward, an admin/log-group notification is sent best-effort, and a
+**catch-all** handler guarantees any other content type (sticker, voice, …) still
+gets guidance — the flow is **never silently stuck**.
+
+**«حساب من» (My Account)** (`app/bot/handlers/user/account.py`). The previously
+dead menu button now shows a summary — name, numeric Telegram id, username,
+account status, wallet balance, and counts of orders / services / licenses — with
+quick-link buttons to wallet, orders, services, the license section and support.
+The **admin note is never exposed**; a restricted user sees a safe notice.
+
+**Rules & main menu.** `قوانین` is **removed from the menu**; the rules text is
+shown on `/start` (admins additionally see “تغییر قوانین از پنل مدیریت انجام
+می‌شود”). The main menu is: محصولات · سفارش‌های من · سرویس‌های من ·
+{license-section-title} · کیف پول · حساب من · آموزش‌ها · پشتیبانی (+ referral /
+language). The **license section title** is configurable via the new
+`license_section_title` setting (default «لایسنس‌های من»; e.g. set «اپل آیدی‌های
+من») and is used for the menu button, the `/my_licenses` header, and its empty
+state. **«سفارش‌های من»** now renders a readable multi-line block per order
+(number, product, status, amount, payment method, date, rejection reason, delivery
+status). New settings: `license_section_title` (texts) and
+`online_gateway_enabled` (payment, default off).
 
 ### Phase 12 — backup, restore & maintenance
 

@@ -11,6 +11,7 @@ from aiogram.types import Message
 from app.bot.handlers.user.language import language_picker_keyboard
 from app.bot.keyboards.user import user_main_menu
 from app.core.settings_service import SettingsService
+from app.i18n import t
 from app.database import SessionLocal
 from app.services import audit_service, referral_service, user_service
 
@@ -55,7 +56,10 @@ async def on_start(
                     await session.commit()
             except Exception as exc:  # noqa: BLE001 - referral must never block /start
                 log.info("referral registration skipped: %s", exc)
-        start_text = await SettingsService(session).get_str("start_text", "")
+        svc = SettingsService(session)
+        start_text = await svc.get_str("start_text", "")
+        rules_text = await svc.get_str("rules_text", "")
+        license_title = (await svc.get_str("license_section_title", "")).strip()
 
     if created:
         # New user: pick a language first; the menu follows in that language.
@@ -64,8 +68,17 @@ async def on_start(
 
     await message.answer(
         start_text or _("greeting"),
-        reply_markup=user_main_menu(lang, is_admin=is_admin),
+        reply_markup=user_main_menu(
+            lang, is_admin=is_admin,
+            license_title=license_title or t("btn.my_licenses", lang)),
     )
+    # Rules are shown on /start (there is no قوانین button in the menu). Admins get
+    # a hint that the text is edited from the admin panel.
+    if rules_text.strip():
+        body = f"{_('rules.title')}\n\n{rules_text}"
+        if is_admin:
+            body += "\n\n" + _("rules.admin_change_hint")
+        await message.answer(body)
 
 
 @router.message(Command("ping"))

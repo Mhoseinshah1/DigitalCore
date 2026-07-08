@@ -38,6 +38,18 @@
                value="{{ product.price if product else 0 }}">
       </div>
       <div class="field">
+        <label for="category_id">{{ _("web.products.form.category") }}</label>
+        <select id="category_id" name="category_id">
+          <option value="">{{ _("web.products.form.no_category") }}</option>
+          {% for c in product_categories %}
+          <option value="{{ c.id }}"
+                  {% if product and product.category_id == c.id %}selected{% endif %}>
+            {{ c.title }}{% if not c.is_active %} — {{ _("web.products.categories.inactive") }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
         <label for="sort_order">{{ _("web.products.form.sort_order") }}</label>
         <input id="sort_order" name="sort_order" type="number"
                value="{{ product.sort_order if product else 0 }}">

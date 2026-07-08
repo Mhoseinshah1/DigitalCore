@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from app.bot.keyboards.user import user_main_menu
+from app.bot.keyboards.user import user_main_menu_async
 from app.database import SessionLocal
 from app.i18n import SUPPORTED, normalize_lang, t, texts_for
 from app.services import user_service
@@ -52,5 +52,5 @@ async def on_language_chosen(callback: CallbackQuery, is_admin: bool = False) ->
     if isinstance(callback.message, Message):
         await callback.message.answer(
             t("lang.saved", chosen),
-            reply_markup=user_main_menu(chosen, is_admin=is_admin),
+            reply_markup=await user_main_menu_async(chosen, is_admin=is_admin),
         )

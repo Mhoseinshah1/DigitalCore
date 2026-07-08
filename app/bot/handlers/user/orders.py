@@ -11,7 +11,7 @@ from collections.abc import Callable
 from io import BytesIO
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command
+from aiogram.filters import BaseFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -113,6 +113,12 @@ def _payment_instruction_lines(order, product, cfg: dict[str, str], _: Callable[
 
 CB_PAY_CARD = "upayc:"
 CB_PAY_WALLET = "upayw:"
+
+# Invoice (پیش‌فاکتور) payment buttons, one per method (bot UX). These carry the
+# chosen method through the coupon prompt before actually charging.
+CB_INV_WALLET = "uinvw:"
+CB_INV_CARD = "uinvc:"
+CB_INV_GATEWAY = "uinvg:"
 
 
 async def _apply_coupon_best_effort(session, order_id: int, coupon_code: str | None,
@@ -286,6 +292,106 @@ async def _offer_payment_methods(reply, tg_user, product_id: int, _: Callable[..
     await _start_card_payment(reply, tg_user, product_id, _, state, coupon_code=coupon_code)
 
 
+async def payment_method_rows(
+    session, product_id: int, _: Callable[..., str]
+) -> tuple[list[list[InlineKeyboardButton]], str | None]:
+    """Invoice payment buttons for the currently enabled methods (bot UX).
+
+    Returns ``(rows, note)``. ``note`` is a clear message when no payment method
+    is available so the invoice never dead-ends with a lone Back button.
+    """
+    svc = SettingsService(session)
+    card_ok = (await svc.get_bool("card_to_card_enabled", True)
+               and bool((await svc.get_str("card_number", "")).strip()))
+    wallet_ok = (await svc.get_bool("wallet_enabled", True)
+                 and await svc.get_bool("wallet_payment_enabled", True))
+    gateway_ok = await svc.get_bool("online_gateway_enabled", False)
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if wallet_ok:
+        rows.append([InlineKeyboardButton(
+            text=_("btn.pay_wallet"), callback_data=f"{CB_INV_WALLET}{product_id}")])
+    if card_ok:
+        rows.append([InlineKeyboardButton(
+            text=_("btn.pay_card"), callback_data=f"{CB_INV_CARD}{product_id}")])
+    if gateway_ok:
+        rows.append([InlineKeyboardButton(
+            text=_("btn.pay_gateway"), callback_data=f"{CB_INV_GATEWAY}{product_id}")])
+    note = None if rows else _("products.invoice.no_methods")
+    return rows, note
+
+
+async def _dispatch_method(reply, tg_user, product_id: int, method: str,
+                           coupon_code: str | None, _: Callable[..., str],
+                           state: FSMContext, bot) -> None:
+    """Run the concrete payment for the chosen invoice method."""
+    if method == "wallet":
+        await _pay_with_wallet(reply, tg_user, product_id, _, bot, coupon_code=coupon_code)
+    else:
+        await _start_card_payment(reply, tg_user, product_id, _, state, coupon_code=coupon_code)
+
+
+async def _begin_method_purchase(reply, tg_user, product_id: int, method: str,
+                                 _: Callable[..., str], state: FSMContext, bot) -> None:
+    """Invoice button tapped: prompt for a coupon (if enabled) then pay via `method`."""
+    async with SessionLocal() as session:
+        svc = SettingsService(session)
+        if not await svc.get_bool("sales_enabled", True):
+            if reply is not None:
+                await reply.answer(_("purchase.sales_disabled"))
+            return
+        coupons_on = await svc.get_bool("coupons_enabled", True)
+        product = await product_service.get(session, product_id)
+    if product is None:
+        if reply is not None:
+            await reply.answer(_("products.unknown"))
+        return
+    await state.set_state(None)
+    await state.update_data(buy_product_id=product_id, buy_coupon=None, buy_method=method)
+    if coupons_on and reply is not None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("coupon.btn.enter"),
+                                  callback_data=f"{CB_COUPON_ENTER}{product_id}")],
+            [InlineKeyboardButton(text=_("coupon.btn.skip"),
+                                  callback_data=f"{CB_COUPON_SKIP}{product_id}")],
+        ])
+        await reply.answer(
+            _("coupon.prompt", price=f"{int(product.price or 0):,}"), reply_markup=kb)
+        return
+    await _dispatch_method(reply, tg_user, product_id, method, None, _, state, bot)
+
+
+@router.callback_query(F.data.startswith(CB_INV_WALLET))
+async def on_inv_wallet(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_INV_WALLET):])
+    await callback.answer()
+    await _begin_method_purchase(callback.message, callback.from_user, product_id,
+                                 "wallet", _, state, bot)
+
+
+@router.callback_query(F.data.startswith(CB_INV_CARD))
+async def on_inv_card(
+    callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    product_id = int((callback.data or "0")[len(CB_INV_CARD):])
+    await callback.answer()
+    await _begin_method_purchase(callback.message, callback.from_user, product_id,
+                                 "card", _, state, bot)
+
+
+@router.callback_query(F.data.startswith(CB_INV_GATEWAY))
+async def on_inv_gateway(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    """Online gateway is not implemented — show a clear placeholder either way."""
+    async with SessionLocal() as session:
+        enabled = await SettingsService(session).get_bool("online_gateway_enabled", False)
+    await callback.answer(
+        _("gateway.coming_soon") if enabled else _("gateway.disabled"), show_alert=True)
+
+
 @router.callback_query(F.data.startswith(CB_BUY))
 async def on_buy(
     callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
@@ -324,8 +430,14 @@ async def on_coupon_skip(
     callback: CallbackQuery, bot: Bot, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
     product_id = int((callback.data or "0")[len(CB_COUPON_SKIP):])
+    data = await state.get_data()
+    method = data.get("buy_method")
     await state.set_state(None)
     await callback.answer()
+    if method:
+        await _dispatch_method(callback.message, callback.from_user, product_id, method,
+                               None, _, state, bot)
+        return
     await _offer_payment_methods(callback.message, callback.from_user, product_id, _, state,
                                  bot, coupon_code=None)
 
@@ -373,10 +485,14 @@ async def on_coupon_code(
         price = int(product.price or 0)
         final = max(0, price - discount)
         norm_code = coupon.code
+    method = data.get("buy_method")
     await state.set_state(None)
     await state.update_data(buy_coupon=norm_code)
     await message.answer(_("coupon.applied", code=norm_code, original=f"{price:,}",
                            discount=f"{discount:,}", final=f"{final:,}"))
+    if method:
+        await _dispatch_method(message, tg, product_id, method, norm_code, _, state, bot)
+        return
     await _offer_payment_methods(message, tg, product_id, _, state, bot, coupon_code=norm_code)
 
 
@@ -657,48 +773,85 @@ async def on_receipt_next_phase(
     await callback.answer(_("notify.receipt.next_phase"), show_alert=True)
 
 
+def _order_lines(o, lang: str, _: Callable[..., str]) -> list[str]:
+    """A readable multi-line block for one order (My Orders)."""
+    title = o.product.title if o.product else "—"
+    method_key = f"order.method.{o.payment_method}"
+    method = _(method_key)
+    if method == method_key:
+        method = _("order.method.unknown")
+    lines = [
+        _("orders.row.number", number=o.order_number),
+        _("orders.row.product", title=title),
+        _("orders.row.status", status=order_status_label(o.status, lang)),
+    ]
+    if o.discount_amount:
+        lines.append(_("orders.row.original", amount=f"{o.amount:,}"))
+    lines.append(_("orders.row.amount", amount=f"{o.final_amount:,}"))
+    lines.append(_("orders.row.method", method=method))
+    if o.created_at:
+        lines.append(_("orders.row.date", date=o.created_at.strftime("%Y-%m-%d %H:%M")))
+    if o.status == "rejected" and o.reject_reason:
+        lines.append(_("orders.row.reject", reason=o.reject_reason))
+    delivery_key = "order.delivery.delivered" if o.delivered_at else "order.delivery.pending"
+    lines.append(_("orders.row.delivery", delivery=_(delivery_key)))
+    return lines
+
+
+async def render_orders(reply, tg_user, _: Callable[..., str], lang: str) -> None:
+    """Render the caller's orders. Shared by the /orders handler and the account page."""
+    async with SessionLocal() as session:
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        orders = await order_service.list_user_orders(session, user.id) if user else []
+    if not orders:
+        await reply.answer(_("orders.user.empty"))
+        return
+    blocks = ["\n".join(_order_lines(o, lang, _)) for o in orders]
+    await reply.answer(
+        _("orders.user.title") + "\n\n" + "\n\n".join(blocks), parse_mode="HTML")
+
+
 @router.message(Command("orders"))
 @router.message(F.text.in_(texts_for("btn.my_orders")))
 async def on_orders(
     message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
 ) -> None:
     await state.clear()
-    tg_user = message.from_user
-    async with SessionLocal() as session:
-        user = await user_service.get_by_telegram_id(session, tg_user.id)
-        orders = await order_service.list_user_orders(session, user.id) if user else []
-
-    if not orders:
-        await message.answer(_("orders.user.empty"))
-        return
-
-    lines = [_("orders.user.title"), ""]
-    for o in orders:
-        title = o.product.title if o.product else "—"
-        created = o.created_at.strftime("%Y-%m-%d") if o.created_at else ""
-        lines.append(
-            f"• <code>{o.order_number}</code> · {title} · "
-            f"{o.final_amount:,} · {order_status_label(o.status, lang)} · {created}"
-        )
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    await render_orders(message, message.from_user, _, lang)
 
 
-@router.message(Command("my_licenses"))
-@router.message(F.text.in_(texts_for("btn.my_licenses")))
-async def on_my_licenses(
-    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
-) -> None:
-    await state.clear()
-    tg_user = message.from_user
+class LicenseButtonFilter(BaseFilter):
+    """Match the license main-menu button whose label is configurable.
+
+    Matches the default i18n texts with no DB read; only when the text is not a
+    default label does it read the configured ``license_section_title`` setting.
+    """
+
+    async def __call__(self, message: Message) -> bool:
+        text = (message.text or "").strip()
+        if not text:
+            return False
+        if text in texts_for("btn.my_licenses"):
+            return True
+        async with SessionLocal() as session:
+            title = (await SettingsService(session)
+                     .get_str("license_section_title", "")).strip()
+        return bool(title) and text == title
+
+
+async def render_my_licenses(reply, tg_user, _: Callable[..., str], lang: str) -> None:
+    """Render the caller's license items using the configurable section title."""
     async with SessionLocal() as session:
         user = await user_service.get_by_telegram_id(session, tg_user.id)
         licenses = await license_service.list_user_licenses(session, user.id) if user else []
+        title_text = (await SettingsService(session)
+                      .get_str("license_section_title", "")).strip() or _("licenses.user.title")
 
     if not licenses:
-        await message.answer(_("licenses.user.empty"))
+        await reply.answer(f"{title_text}\n\n{_('licenses.user.empty')}")
         return
 
-    lines = [_("licenses.user.title"), ""]
+    lines = [title_text, ""]
     buttons: list[list[InlineKeyboardButton]] = []
     for lic in licenses:
         title = lic.product.title if lic.product else "—"
@@ -707,10 +860,20 @@ async def on_my_licenses(
         lines.append(f"• {title}{order_no} · {sold}")
         buttons.append([InlineKeyboardButton(
             text=title, callback_data=f"{CB_LICENSE}{lic.id}")])
-    await message.answer(
+    await reply.answer(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
+
+
+@router.message(Command("my_licenses"))
+@router.message(F.text.in_(texts_for("btn.my_licenses")))
+@router.message(LicenseButtonFilter())
+async def on_my_licenses(
+    message: Message, _: Callable[..., str], state: FSMContext, lang: str = "fa"
+) -> None:
+    await state.clear()
+    await render_my_licenses(message, message.from_user, _, lang)
 
 
 @router.callback_query(F.data.startswith(CB_LICENSE))

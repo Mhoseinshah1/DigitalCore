@@ -11,6 +11,7 @@ class ProductCreate(BaseModel):
     title: str
     description: str | None = None
     price: int = Field(ge=0)
+    category_id: int | None = None
     duration_days: int | None = None
     traffic_gb: int | None = None
     ip_limit: int | None = None
@@ -35,6 +36,7 @@ class ProductUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
     price: int | None = Field(default=None, ge=0)
+    category_id: int | None = None
     duration_days: int | None = None
     traffic_gb: int | None = None
     ip_limit: int | None = None
@@ -57,6 +59,7 @@ class ProductRead(BaseModel):
     title: str
     description: str | None
     price: int
+    category_id: int | None
     duration_days: int | None
     traffic_gb: int | None
     ip_limit: int | None

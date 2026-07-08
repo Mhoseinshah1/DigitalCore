@@ -94,7 +94,9 @@ async def test_my_licenses_empty(db) -> None:
         await s.commit()
     msg = FM(FU(11))
     await on_my_licenses(msg, FA, FS(), lang="fa")
-    assert msg.answers == [FA("licenses.user.empty")]
+    # The configurable section title is shown as a header even in the empty state.
+    assert len(msg.answers) == 1
+    assert FA("licenses.user.empty") in msg.answers[0]
 
 
 async def test_license_detail_only_own(db) -> None:

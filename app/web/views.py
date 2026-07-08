@@ -55,6 +55,7 @@ from app.services import (
     license_service,
     order_service,
     payment_service,
+    product_category_service,
     product_service,
     referral_service,
     report_service,
@@ -136,6 +137,8 @@ NAV_TREE: list[dict] = [
         {"label_key": "nav.products.all", "icon": "📦", "href": "/admin/products",
          "permission": "manage_products"},
         {"label_key": "nav.products.create", "icon": "➕", "href": "/admin/products/create",
+         "permission": "manage_products"},
+        {"label_key": "nav.products.categories", "icon": "🗂", "href": "/admin/product-categories",
          "permission": "manage_products"},
         {"label_key": "nav.products.license", "icon": "🔑", "href": "/admin/products/license",
          "permission": "manage_products", "placeholder": True},
@@ -912,6 +915,7 @@ def _product_form_values(form: dict[str, object]) -> dict[str, object]:
         "title": str(form.get("title", "")).strip(),
         "description": (str(form.get("description", "")).strip() or None),
         "price": _parse_int_opt(form.get("price")) or 0,
+        "category_id": _parse_int_opt(form.get("category_id")),
         "duration_days": _parse_int_opt(form.get("duration_days")),
         "traffic_gb": _parse_int_opt(form.get("traffic_gb")),
         "ip_limit": _parse_int_opt(form.get("ip_limit")),
@@ -926,9 +930,10 @@ def _product_form_values(form: dict[str, object]) -> dict[str, object]:
 
 
 async def _product_form_ctx(session: AsyncSession) -> dict[str, object]:
-    """Server/inbound options shared by the product create + edit forms."""
+    """Server/inbound + category options shared by the product create + edit forms."""
     servers = await xui_server_service.list_servers(session, active_only=True)
-    return {"xui_servers": servers}
+    categories = await product_category_service.list_all(session)
+    return {"xui_servers": servers, "product_categories": categories}
 
 
 @router.get("/products", response_class=HTMLResponse)
@@ -943,9 +948,12 @@ async def products_page(
     if deny:
         return deny
     products = await product_service.list_for_admin(session)
+    categories = await product_category_service.list_all(session)
+    category_names = {c.id: c.title for c in categories}
     return render_template(
         "products.html",
-        _ctx(request, admin, products=products, saved=bool(saved), error=error),
+        _ctx(request, admin, products=products, category_names=category_names,
+             saved=bool(saved), error=error),
     )
 
 
@@ -1072,6 +1080,141 @@ async def product_delete_or_hide(
         )
         await session.commit()
     return RedirectResponse("/admin/products?saved=1", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Product categories (bot UX): admin-managed groups the bot browses first.
+# --------------------------------------------------------------------------
+def _product_categories_back(*, saved: str = "", error: str = "") -> RedirectResponse:
+    q = f"saved={quote(saved)}" if saved else f"error={quote(error)}"
+    return RedirectResponse(f"/admin/product-categories?{q}", status_code=303)
+
+
+@router.get("/product-categories", response_class=HTMLResponse)
+async def product_categories_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    saved: str = "",
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    categories = await product_category_service.list_all(session)
+    counts = {c.id: await product_category_service.count_products(session, c.id)
+              for c in categories}
+    return render_template(
+        "product_categories.html",
+        _ctx(request, admin, categories=categories, counts=counts,
+             saved=saved, error=error),
+    )
+
+
+@router.get("/product-categories/create", response_class=HTMLResponse)
+async def product_category_new_page(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    return render_template(
+        "product_category_form.html",
+        _ctx(request, admin, category=None, error=error),
+    )
+
+
+@router.post("/product-categories/create")
+async def product_category_create(
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        await product_category_service.create(
+            session,
+            title=str(form.get("title", "")),
+            description=(str(form.get("description", "")).strip() or None),
+            sort_order=_parse_int_opt(form.get("sort_order")) or 0,
+            is_active="is_active" in form,
+            actor_id=admin.id,
+        )
+        await session.commit()
+    except product_category_service.CategoryError as exc:
+        return _product_categories_back(error=str(exc))
+    return _product_categories_back(saved="created")
+
+
+@router.get("/product-categories/{category_id}/edit", response_class=HTMLResponse)
+async def product_category_edit_page(
+    category_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+    error: str = "",
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    category = await product_category_service.get(session, category_id)
+    if category is None:
+        return RedirectResponse("/admin/product-categories", status_code=302)
+    return render_template(
+        "product_category_form.html",
+        _ctx(request, admin, category=category, error=error),
+    )
+
+
+@router.post("/product-categories/{category_id}/edit")
+async def product_category_edit(
+    category_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    form = dict(await request.form())
+    try:
+        updated = await product_category_service.update(
+            session, category_id,
+            title=str(form.get("title", "")),
+            description=(str(form.get("description", "")).strip() or None),
+            sort_order=_parse_int_opt(form.get("sort_order")) or 0,
+            is_active="is_active" in form,
+            actor_id=admin.id,
+        )
+        if updated is None:
+            return _product_categories_back(error="not found")
+        await session.commit()
+    except product_category_service.CategoryError as exc:
+        return _product_categories_back(error=str(exc))
+    return _product_categories_back(saved="updated")
+
+
+@router.post("/product-categories/{category_id}/toggle-active")
+async def product_category_toggle_active(
+    category_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    lang, deny = _guard(request, admin, "manage_products")
+    if deny:
+        return deny
+    await product_category_service.toggle_active(
+        session, category_id, actor_id=admin.id
+    )
+    await session.commit()
+    return _product_categories_back(saved="updated")
 
 
 # --------------------------------------------------------------------------

@@ -21,6 +21,7 @@
         <tr>
           <th>{{ _("web.products.col.title") }}</th>
           <th>{{ _("web.products.col.type") }}</th>
+          <th>{{ _("web.products.col.category") }}</th>
           <th>{{ _("web.products.col.price") }}</th>
           <th>{{ _("web.products.col.specs") }}</th>
           <th>{{ _("web.products.col.status") }}</th>
@@ -32,6 +33,7 @@
         <tr>
           <td>{{ p.title }}</td>
           <td>{{ _("product.type." ~ p.type) }}{% if p.applies_to_service and p.action_type %} <span class="pill">{{ _("web.products.form.action." ~ p.action_type) }}</span>{% endif %}</td>
+          <td class="muted">{% if p.category_id and p.category_id in category_names %}{{ category_names[p.category_id] }}{% else %}<span class="muted">—</span>{% endif %}</td>
           <td>{{ _("product.price_fmt", price="{:,}".format(p.price)) }}</td>
           <td class="muted">
             {% if p.type == "v2ray" %}
