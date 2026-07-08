@@ -62,6 +62,29 @@ from app.web.deps import COOKIE_NAME, get_current_admin_optional, set_session_co
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
+
+def render_template(name: str, context: dict, status_code: int = 200):
+    """Render a Jinja template in a way that is stable across Starlette versions.
+
+    Starlette >= 0.29 made ``request`` the first positional argument of
+    ``TemplateResponse`` (``request, name, context``). Older code that called
+    ``TemplateResponse(name, context)`` therefore had the context dict treated
+    as the template *name*, which crashes with ``TypeError: unhashable type:
+    'dict'`` when Jinja tries to use it as a cache key (seen after the FastAPI
+    0.115 -> 0.139 / Starlette 0.41 -> 1.x bump).
+
+    Every context here is built by ``_ctx`` and always carries ``request``, so
+    we pull it out and call ``TemplateResponse`` with explicit keyword
+    arguments that are accepted by both the old and new Starlette signatures.
+    """
+    context = dict(context or {})
+    request = context.get("request")
+    context.setdefault("request", request)
+    return templates.TemplateResponse(
+        request=request, name=name, context=context, status_code=status_code
+    )
+
+
 # Panel routes live under /admin; a couple of root redirects point here.
 router = APIRouter(prefix="/admin", include_in_schema=False)
 root_router = APIRouter(include_in_schema=False)
@@ -360,7 +383,7 @@ def _make_placeholder(title_key: str, permission: str):
         lang, deny = _guard(request, admin, permission)
         if deny:
             return deny
-        return templates.TemplateResponse(
+        return render_template(
             "placeholder.html", _ctx(request, admin, page_title_key=title_key)
         )
 
@@ -392,7 +415,7 @@ async def switch_language(code: str, request: Request):
 async def login_page(request: Request, admin: Admin | None = Depends(get_current_admin_optional)):
     if admin is not None:
         return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("login.html", _ctx(request, None, error=None))
+    return render_template("login.html", _ctx(request, None, error=None))
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -405,7 +428,7 @@ async def login_submit(
     admin = await authenticate_admin(session, username, password)
     if admin is None:
         lang = _resolve_lang(request)
-        return templates.TemplateResponse(
+        return render_template(
             "login.html",
             _ctx(request, None, error=t("web.invalid_credentials", lang)),
             status_code=401,
@@ -449,7 +472,7 @@ async def dashboard(
     site_name = await svc.get_str("site_name", "DigitalCore")
     maintenance = await svc.get_bool("maintenance_mode", False)
     sales = await svc.get_bool("sales_enabled", True)
-    return templates.TemplateResponse(
+    return render_template(
         "dashboard.html",
         _ctx(
             request, admin,
@@ -478,7 +501,7 @@ async def users_page(
     if deny:
         return deny
     users = await user_service.list_users(session, search=(q or None))
-    return templates.TemplateResponse(
+    return render_template(
         "users_list.html",
         _ctx(request, admin, users=users, q=q, blocked_only=False,
              saved=bool(saved), error=error),
@@ -495,7 +518,7 @@ async def users_blocked_page(
     if deny:
         return deny
     users = await user_service.list_blocked_users(session)
-    return templates.TemplateResponse(
+    return render_template(
         "users_list.html",
         _ctx(request, admin, users=users, q="", blocked_only=True, saved=False, error=""),
     )
@@ -518,7 +541,7 @@ async def wallet_adjustments_page(
         u = await user_service.get_by_id(session, uid)
         if u is not None:
             labels[uid] = u.username or (u.telegram_id and str(u.telegram_id)) or f"#{u.id}"
-    return templates.TemplateResponse(
+    return render_template(
         "wallet_transactions.html",
         _ctx(request, admin, txns=txns, labels=labels),
     )
@@ -543,7 +566,7 @@ async def user_detail_page(
     txns = await user_service.list_wallet_transactions(session, user_id=user_id, limit=20)
     orders = await order_service.list_user_orders(session, user_id, limit=20)
     order_rows = [_order_row(o, lang) for o in orders]
-    return templates.TemplateResponse(
+    return render_template(
         "user_detail.html",
         _ctx(request, admin, user=user, summary=summary, txns=txns,
              orders=order_rows,
@@ -756,7 +779,7 @@ async def settings_page(
     svc = SettingsService(session)
     rows = {r.key: r for r in await svc.all_rows()}
     items = _settings_items(rows, category, lang)
-    return templates.TemplateResponse(
+    return render_template(
         "settings_page.html",
         _ctx(request, admin, page=page, category=category,
              title=category_title_for(category, lang), items=items,
@@ -864,7 +887,7 @@ async def products_page(
     if deny:
         return deny
     products = await product_service.list_for_admin(session)
-    return templates.TemplateResponse(
+    return render_template(
         "products.html",
         _ctx(request, admin, products=products, saved=bool(saved), error=error),
     )
@@ -879,7 +902,7 @@ async def product_new_page(
     lang, deny = _guard(request, admin, "manage_products")
     if deny:
         return deny
-    return templates.TemplateResponse(
+    return render_template(
         "product_form.html",
         _ctx(request, admin, product=None, product_types=PRODUCT_TYPES, error="",
              inbounds=[], **await _product_form_ctx(session)),
@@ -923,7 +946,7 @@ async def product_edit_page(
     inbounds: list = []
     if product.xui_server_id:
         inbounds = await xui_server_service.list_inbounds(session, product.xui_server_id)
-    return templates.TemplateResponse(
+    return render_template(
         "product_form.html",
         _ctx(request, admin, product=product, product_types=PRODUCT_TYPES, error="",
              inbounds=inbounds, **await _product_form_ctx(session)),
@@ -1011,7 +1034,7 @@ async def audit_logs_page(
     logs = await audit_service.list_recent(session, limit=200)
     if scope == "admin":
         logs = [r for r in logs if r.actor_type == "admin"]
-    return templates.TemplateResponse(
+    return render_template(
         "audit_logs.html",
         _ctx(request, admin, logs=logs, scope=scope),
     )
@@ -1057,7 +1080,7 @@ async def xui_servers_page(
         return deny
     servers = await xui_server_service.list_servers(session)
     counts = await xui_server_service.inbound_counts(session)
-    return templates.TemplateResponse(
+    return render_template(
         "xui_servers.html",
         _ctx(request, admin, servers=servers, counts=counts,
              saved=bool(saved), error=error, tested=tested, synced=synced),
@@ -1072,7 +1095,7 @@ async def xui_server_new_page(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
-    return templates.TemplateResponse(
+    return render_template(
         "xui_server_form.html",
         _ctx(request, admin, server=None, error=""),
     )
@@ -1113,7 +1136,7 @@ async def xui_server_edit_page(
     server = await xui_server_service.get_server(session, server_id)
     if server is None:
         return RedirectResponse("/admin/xui-servers", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "xui_server_form.html",
         _ctx(request, admin, server=server, error=""),
     )
@@ -1218,7 +1241,7 @@ async def xui_inbounds_overview(
         groups.append(
             {"server": s, "inbounds": await xui_server_service.list_inbounds(session, s.id)}
         )
-    return templates.TemplateResponse(
+    return render_template(
         "xui_inbounds_overview.html",
         _ctx(request, admin, groups=groups),
     )
@@ -1240,7 +1263,7 @@ async def xui_server_inbounds_page(
     if server is None:
         return RedirectResponse("/admin/xui-servers", status_code=302)
     inbounds = await xui_server_service.list_inbounds(session, server_id)
-    return templates.TemplateResponse(
+    return render_template(
         "xui_inbounds.html",
         _ctx(request, admin, server=server, inbounds=inbounds,
              saved=bool(saved), error=error),
@@ -1260,7 +1283,7 @@ async def xui_inbound_new_page(
     server = await xui_server_service.get_server(session, server_id)
     if server is None:
         return RedirectResponse("/admin/xui-servers", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "xui_inbound_form.html",
         _ctx(request, admin, server=server, inbound=None, error=""),
     )
@@ -1316,7 +1339,7 @@ async def xui_inbound_edit_page(
     if inbound is None:
         return RedirectResponse("/admin/xui-servers", status_code=302)
     server = await xui_server_service.get_server(session, inbound.server_id)
-    return templates.TemplateResponse(
+    return render_template(
         "xui_inbound_form.html",
         _ctx(request, admin, server=server, inbound=inbound, error=""),
     )
@@ -1464,7 +1487,7 @@ async def orders_page(
         return deny
     orders = await order_service.list_all_orders(session)
     rows = [_order_row(o, lang) for o in orders]
-    return templates.TemplateResponse(
+    return render_template(
         "orders.html",
         _ctx(request, admin, rows=rows, pending_only=False,
              perms=_order_action_perms(admin.role)),
@@ -1482,7 +1505,7 @@ async def orders_pending_page(
         return deny
     orders = await order_service.list_pending_receipt_orders(session)
     rows = [_order_row(o, lang) for o in orders]
-    return templates.TemplateResponse(
+    return render_template(
         "orders.html",
         _ctx(request, admin, rows=rows, pending_only=True,
              perms=_order_action_perms(admin.role)),
@@ -1515,7 +1538,7 @@ async def order_detail_page(
         wallet_txns = await user_service.list_wallet_transactions(
             session, user_id=order.user_id, limit=10
         )
-    return templates.TemplateResponse(
+    return render_template(
         "order_detail.html",
         _ctx(request, admin, order=order, payment=order.payment, product=order.product,
              user=order.user, row=_order_row(order, lang), logs=logs,
@@ -1780,7 +1803,7 @@ async def licenses_page(
     licenses = await license_service.list_licenses(
         session, product_id=(product_id or None), status=(status or None), limit=200
     )
-    return templates.TemplateResponse(
+    return render_template(
         "licenses.html",
         _ctx(request, admin, licenses=licenses, products=await _license_products(session),
              product_id=product_id, status=status, saved=saved, error=error),
@@ -1796,7 +1819,7 @@ async def license_import_page(
     lang, deny = _guard(request, admin, "import_licenses")
     if deny:
         return deny
-    return templates.TemplateResponse(
+    return render_template(
         "license_import.html",
         _ctx(request, admin, products=await _license_products(session), result=None, error=""),
     )
@@ -1830,7 +1853,7 @@ async def license_import_submit(
         await session.commit()
     except (ValueError, license_service.LicenseError) as exc:
         error = str(exc)
-    return templates.TemplateResponse(
+    return render_template(
         "license_import.html",
         _ctx(request, admin, products=await _license_products(session),
              result=result, error=error, product_id=product_id or 0),
@@ -1847,7 +1870,7 @@ async def licenses_sold_page(
     if deny:
         return deny
     licenses = await license_service.list_sold(session, limit=200)
-    return templates.TemplateResponse(
+    return render_template(
         "licenses_sold.html", _ctx(request, admin, licenses=licenses),
     )
 
@@ -1868,7 +1891,7 @@ async def licenses_low_stock_page(
         avail = await license_service.count_available(session, p.id)
         rows.append({"product": p, "available": avail, "threshold": threshold,
                      "low": avail < threshold})
-    return templates.TemplateResponse(
+    return render_template(
         "licenses_low_stock.html",
         _ctx(request, admin, rows=rows, threshold=threshold),
     )
@@ -1889,7 +1912,7 @@ async def license_detail_page(
     lic = await license_service.get_license(session, license_id)
     if lic is None:
         return RedirectResponse("/admin/licenses", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "license_detail.html",
         _ctx(request, admin, lic=lic,
              can_secrets=has_permission(admin.role, "view_license_secrets"),
@@ -2044,7 +2067,7 @@ async def v2ray_services_page(
     )
     rows = [_v2ray_row(s, lang) for s in services]
     counts = await v2ray_service.count_by_status(session)
-    return templates.TemplateResponse(
+    return render_template(
         "v2ray_services.html",
         _ctx(request, admin, rows=rows, counts=counts, status=status,
              saved=saved, error=error),
@@ -2073,7 +2096,7 @@ async def v2ray_service_detail_page(
     ]
     rem_bytes = v2ray_lifecycle_service.remaining_bytes(svc)
     rem_days = v2ray_lifecycle_service.remaining_days(svc)
-    return templates.TemplateResponse(
+    return render_template(
         "v2ray_service_detail.html",
         _ctx(request, admin, svc=svc, masked_uuid=_mask_uuid(svc.client_uuid),
              used_disp=_gb_disp(svc.used_gb), total_disp=_gb_disp(svc.total_gb),
@@ -2246,7 +2269,7 @@ async def wallet_topups_pending_page(
         return deny
     topups = await wallet_service.list_pending_topups(session, limit=200)
     rows = [_topup_row(t, lang) for t in topups]
-    return templates.TemplateResponse(
+    return render_template(
         "wallet_topups.html",
         _ctx(request, admin, rows=rows, pending_only=True, status="", saved="", error=""),
     )
@@ -2266,7 +2289,7 @@ async def wallet_topups_page(
         return deny
     topups = await wallet_service.list_topups(session, status=(status or None), limit=200)
     rows = [_topup_row(t, lang) for t in topups]
-    return templates.TemplateResponse(
+    return render_template(
         "wallet_topups.html",
         _ctx(request, admin, rows=rows, pending_only=False, status=status,
              saved=saved, error=error),
@@ -2296,7 +2319,7 @@ async def wallet_transactions_all_page(
         "reason": t.reason,
         "created_at": t.created_at,
     } for t in txns]
-    return templates.TemplateResponse(
+    return render_template(
         "wallet_all_transactions.html", _ctx(request, admin, rows=rows),
     )
 
@@ -2316,7 +2339,7 @@ async def wallet_topup_detail_page(
     topup = await wallet_service.get_topup(session, topup_id)
     if topup is None:
         return RedirectResponse("/admin/wallet/topups", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "wallet_topup_detail.html",
         _ctx(request, admin, topup=topup, status_label=topup_status_label(topup.status, lang),
              can_manage=has_permission(admin.role, "manage_wallet_topups"),
@@ -2467,7 +2490,7 @@ async def tickets_page(
         session, status=(status or None), assigned_admin_id=assigned_admin_id, limit=200,
     )
     counts = await ticket_service.count_by_status(session)
-    return templates.TemplateResponse(
+    return render_template(
         "tickets.html",
         _ctx(request, admin, tickets=tickets, counts=counts, status=status,
              assigned=assigned, status_class=_TICKET_STATUS_CLASS,
@@ -2492,7 +2515,7 @@ async def ticket_detail_page(
     if ticket is None:
         return RedirectResponse("/admin/tickets", status_code=302)
     from app.models.ticket import TICKET_PRIORITIES
-    return templates.TemplateResponse(
+    return render_template(
         "ticket_detail.html",
         _ctx(request, admin, ticket=ticket, messages=ticket.messages,
              priorities=TICKET_PRIORITIES, status_class=_TICKET_STATUS_CLASS,
@@ -2648,7 +2671,7 @@ async def tutorials_page(
     if deny:
         return deny
     tutorials = await tutorial_service.list_tutorials(session)
-    return templates.TemplateResponse(
+    return render_template(
         "tutorials.html",
         _ctx(request, admin, tutorials=tutorials, saved=saved, error=error),
     )
@@ -2672,7 +2695,7 @@ async def tutorial_new_page(
     lang, deny = _guard(request, admin, "manage_tutorials")
     if deny:
         return deny
-    return templates.TemplateResponse(
+    return render_template(
         "tutorial_form.html",
         _ctx(request, admin, tutorial=None, error="", **await _tutorial_form_ctx(session)),
     )
@@ -2710,7 +2733,7 @@ async def tutorial_edit_page(
     tutorial = await tutorial_service.get_tutorial(session, tutorial_id)
     if tutorial is None:
         return RedirectResponse("/admin/tutorials", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "tutorial_form.html",
         _ctx(request, admin, tutorial=tutorial, error="", **await _tutorial_form_ctx(session)),
     )
@@ -2768,7 +2791,7 @@ async def tutorial_categories_page(
     if deny:
         return deny
     categories = await tutorial_service.list_categories(session)
-    return templates.TemplateResponse(
+    return render_template(
         "tutorial_categories.html",
         _ctx(request, admin, categories=categories, saved=saved, error=error),
     )
@@ -2884,7 +2907,7 @@ async def coupons_page(
     if deny:
         return deny
     coupons = await coupon_service.list_coupons(session, limit=300)
-    return templates.TemplateResponse(
+    return render_template(
         "coupons.html",
         _ctx(request, admin, coupons=coupons,
              can_manage=has_permission(admin.role, "manage_coupons"),
@@ -2901,7 +2924,7 @@ async def coupon_new_page(
     lang, deny = _guard(request, admin, "manage_coupons")
     if deny:
         return deny
-    return templates.TemplateResponse(
+    return render_template(
         "coupon_form.html",
         _ctx(request, admin, coupon=None, error="", **await _coupon_form_ctx(session)),
     )
@@ -2943,7 +2966,7 @@ async def coupon_edit_page(
     coupon = await coupon_service.get_coupon(session, coupon_id)
     if coupon is None:
         return RedirectResponse("/admin/coupons", status_code=302)
-    return templates.TemplateResponse(
+    return render_template(
         "coupon_form.html",
         _ctx(request, admin, coupon=coupon, error="", **await _coupon_form_ctx(session)),
     )
@@ -3000,7 +3023,7 @@ async def coupon_usages_page(
     if coupon is None:
         return RedirectResponse("/admin/coupons", status_code=302)
     usages = await coupon_service.list_coupon_usages(session, coupon_id)
-    return templates.TemplateResponse(
+    return render_template(
         "coupon_usages.html",
         _ctx(request, admin, coupon=coupon, usages=usages),
     )
@@ -3027,7 +3050,7 @@ async def referrals_page(
     referrers = {u.referrer_id: None for u in rows}
     for rid in list(referrers):
         referrers[rid] = await session.get(User, rid)
-    return templates.TemplateResponse(
+    return render_template(
         "referrals.html",
         _ctx(request, admin, referred=rows, referrers=referrers),
     )
@@ -3051,7 +3074,7 @@ async def referral_rewards_page(
     if deny:
         return deny
     rewards = await referral_service.list_rewards(session, status=(status or None), limit=300)
-    return templates.TemplateResponse(
+    return render_template(
         "referral_rewards.html",
         _ctx(request, admin, rewards=rewards, status=status, saved=saved, error=error),
     )
