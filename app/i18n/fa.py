@@ -141,6 +141,61 @@ CATALOG: dict[str, str] = {
     "products.invalid": "⚠️ نامعتبر: {error}",
     "products.cancelled": "❌ لغو شد.",
     "products.unknown": "محصول پیدا نشد.",
+    # --- V2Ray product binding (server + inbound) in the admin bot ---
+    "products.v2ray.pick_server": "🧩 سرور 3X-UI را برای این محصول انتخاب کنید:",
+    "products.v2ray.pick_inbound": "📡 اینباند سرور «{server}» را انتخاب کنید:",
+    "products.v2ray.no_server": (
+        "⚠️ امکان ساخت محصول V2Ray وجود ندارد\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "هیچ سرور 3X-UI فعالی در سیستم ثبت نشده است.\n\n"
+        "ابتدا از پنل مدیریت، یک سرور 3X-UI اضافه کنید و اتصال آن را تست کنید."
+    ),
+    "products.v2ray.no_inbound": (
+        "⚠️ این سرور اینباند فعال ندارد\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "برای ساخت محصول V2Ray باید ابتدا اینباندهای سرور را همگام‌سازی کنید."
+    ),
+    "products.v2ray.sync_hint": (
+        "🔄 همگام‌سازی اینباندها\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "برای همگام‌سازی، به پنل وب مدیریت بروید، سرور را باز کنید و روی «همگام‌سازی اینباندها» بزنید.\n\n"
+        "سپس دوباره از ربات، محصول V2Ray بسازید."
+    ),
+    "products.v2ray.sync_btn": "🔄 همگام‌سازی اینباندها",
+    "products.v2ray.other_server_btn": "🧩 انتخاب سرور دیگر",
+    "products.v2ray.cancel_btn": "❌ انصراف",
+    "products.v2ray.skip_btn": "⏭ رد کردن",
+    "products.v2ray.ask_ip_limit": (
+        "👥 محدودیت تعداد کاربر/دستگاه را وارد کنید (یک عدد).\n"
+        "برای نامحدود، «⏭ رد کردن» را بزنید یا ۰ بفرستید."
+    ),
+    "products.v2ray.ask_description": "📝 توضیحات محصول را وارد کنید (اختیاری) یا «⏭ رد کردن» را بزنید.",
+    "products.created_title": "✅ محصول با موفقیت ساخته شد",
+    "products.created_footer": "این محصول اکنون قابل نمایش در ربات است.",
+    "products.duration_value": "{days} روز",
+    "products.lbl.title": "🛍 عنوان محصول:",
+    "products.lbl.type": "📦 نوع محصول:",
+    "products.lbl.price": "💰 قیمت:",
+    "products.lbl.duration": "⏳ مدت:",
+    "products.lbl.traffic": "🌐 حجم:",
+    "products.lbl.server": "🧩 سرور:",
+    "products.lbl.inbound": "📡 اینباند:",
+    "products.lbl.ip_limit": "👥 محدودیت کاربر:",
+    "products.lbl.description": "📝 توضیحات:",
+    "products.lbl.product": "🛍 محصول:",
+    "products.lbl.category": "📦 دسته‌بندی:",
+    # --- Manual card-to-card receipt (big, readable style) ---
+    "purchase.manual_title": "💳 پرداخت کارت‌به‌کارت",
+    "purchase.manual_footer": "پس از پرداخت، روی «پرداخت کردم» بزنید و تصویر یا PDF رسید را ارسال کنید.",
+    "purchase.lbl.order": "🧾 شماره سفارش:",
+    "purchase.lbl.product": "🛍 محصول:",
+    "purchase.lbl.amount": "💰 مبلغ پرداخت:",
+    "purchase.lbl.card": "🏦 شماره کارت:",
+    "purchase.lbl.card_owner": "👤 صاحب کارت:",
+    "purchase.lbl.sheba": "🏦 شماره شبا:",
+    "purchase.lbl.tracking": "🔎 کد پیگیری:",
+    "purchase.lbl.original": "🏷 مبلغ اصلی:",
+    "purchase.lbl.discount": "🏷 تخفیف:",
     "products.edit_prompt": "مقدار جدید {field} را ارسال کنید (/cancel برای لغو):",
     "btn.prod.toggle_active": "🔁 فعال/غیرفعال",
     "btn.prod.toggle_hidden": "👁 نمایش/پنهان",

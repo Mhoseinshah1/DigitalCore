@@ -16,12 +16,14 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.states.products import ProductAddForm, ProductEditForm
+from app.bot.utils.message_format import esc, format_gb, format_money, render_big_message
 from app.core.permissions import Role, has_permission
 from app.database import SessionLocal
 from app.i18n import t, texts_for
 from app.models.product import PRODUCT_TYPES, Product
+from app.models.xui_inbound import XuiInbound
 from app.schemas.product import ProductCreate, ProductUpdate
-from app.services import product_service
+from app.services import product_service, xui_server_service
 
 log = logging.getLogger("bot.products")
 
@@ -34,6 +36,15 @@ CB_VIEW = "prod:view:"
 CB_TOGGLE = "prod:toggle:"
 CB_HIDE = "prod:hide:"
 CB_EDIT = "prod:edit:"
+
+# V2Ray add-flow callbacks (server + inbound binding, optional extras).
+CB_ADD_SRV = "padd:srv:"       # padd:srv:<server_id>  — server chosen
+CB_ADD_SRVLIST = "padd:srvs"   # re-show the server picker
+CB_ADD_INB = "padd:inb:"       # padd:inb:<inbound_record_id> — inbound chosen
+CB_ADD_SYNC = "padd:sync:"     # padd:sync:<server_id> — sync-inbounds guidance
+CB_ADD_SKIP_IP = "padd:skipip"
+CB_ADD_SKIP_DESC = "padd:skipdesc"
+CB_ADD_CANCEL = "padd:cancel"
 
 EDITABLE_FIELDS = ("title", "price", "duration_days", "traffic_gb")
 
@@ -142,6 +153,7 @@ async def on_back_to_list(
         await callback.answer(_("products.not_authorized"), show_alert=True)
         return
     text, keyboard = await _admin_overview(lang)
+    # isinstance (not `is not None`): an InaccessibleMessage has no edit_text.
     if isinstance(callback.message, Message):
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
@@ -168,7 +180,7 @@ async def on_add(
             ]
         ]
     )
-    if isinstance(callback.message, Message):
+    if callback.message is not None:
         await callback.message.answer(_("products.pick_type"), reply_markup=keyboard)
     await callback.answer()
 
@@ -188,8 +200,10 @@ async def on_type_chosen(
         await callback.answer(_("products.unknown"), show_alert=True)
         return
     await state.set_state(ProductAddForm.entering_title)
-    await state.update_data(type=product_type)
-    if isinstance(callback.message, Message):
+    # Remember who is adding, so a create finished from a callback (skip button)
+    # still audits under the real admin, not the bot account.
+    await state.update_data(type=product_type, admin_id=callback.from_user.id)
+    if callback.message is not None:
         await callback.message.answer(_("products.ask_title"))
     await callback.answer()
 
@@ -198,6 +212,8 @@ async def on_type_chosen(
 @router.message(ProductAddForm.entering_price, Command("cancel"))
 @router.message(ProductAddForm.entering_duration, Command("cancel"))
 @router.message(ProductAddForm.entering_traffic, Command("cancel"))
+@router.message(ProductAddForm.entering_ip_limit, Command("cancel"))
+@router.message(ProductAddForm.entering_description, Command("cancel"))
 @router.message(ProductEditForm.entering_value, Command("cancel"))
 async def on_cancel(message: Message, state: FSMContext, _: Callable[..., str]) -> None:
     await state.clear()
@@ -253,14 +269,234 @@ async def on_duration(message: Message, state: FSMContext, _: Callable[..., str]
 
 @router.message(ProductAddForm.entering_traffic, F.text)
 async def on_traffic(
-    message: Message, state: FSMContext, _: Callable[..., str], role: Role | None = None
+    message: Message, state: FSMContext, _: Callable[..., str],
+    lang: str = "fa", role: Role | None = None,
 ) -> None:
     traffic = _parse_positive_int(message.text or "")
     if not traffic:
         await message.answer(_("products.invalid_number"))
         return
     await state.update_data(traffic_gb=traffic)
+    # A V2Ray product MUST be bound to an XUI server + inbound — collect them now
+    # (the old flow skipped this and product_service rejected the create).
+    await _prompt_server(message, state, _, lang)
+
+
+# --------------------------------------------------------------------------
+# V2Ray binding: server picker -> inbound picker -> optional extras -> create.
+# --------------------------------------------------------------------------
+def _server_label(server) -> str:
+    status = (server.status or "").strip()
+    return f"{server.name} · {status}" if status and status != "unknown" else server.name
+
+
+def _inbound_label(inbound: XuiInbound) -> str:
+    name = inbound.remark or inbound.tag or f"inbound {inbound.inbound_id}"
+    proto = (inbound.protocol or "").strip()
+    if proto and inbound.port:
+        return f"{name} · {proto}:{inbound.port}"
+    return name
+
+
+def _cancel_row(_: Callable[..., str]) -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text=_("products.v2ray.cancel_btn"), callback_data=CB_ADD_CANCEL)]
+
+
+async def _prompt_server(reply: Message, state: FSMContext, _: Callable[..., str], lang: str) -> None:
+    """Show active XUI servers, or a clear error when none exist."""
+    async with SessionLocal() as session:
+        servers = await xui_server_service.list_servers(session, active_only=True)
+    if not servers:
+        await state.clear()
+        await reply.answer(_("products.v2ray.no_server"), parse_mode="HTML")
+        return
+    rows = [[InlineKeyboardButton(text=_server_label(s), callback_data=f"{CB_ADD_SRV}{s.id}")]
+            for s in servers]
+    rows.append(_cancel_row(_))
+    await state.set_state(ProductAddForm.choosing_server)
+    await reply.answer(_("products.v2ray.pick_server"),
+                       reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+async def _prompt_inbound(reply: Message, state: FSMContext, server_id: int,
+                          _: Callable[..., str]) -> None:
+    """Show active synced inbounds for a server, or a clear error + guidance."""
+    async with SessionLocal() as session:
+        server = await xui_server_service.get_server(session, server_id)
+        if server is None:
+            await state.clear()
+            await reply.answer(_("products.unknown"))
+            return
+        inbounds = await xui_server_service.list_inbounds(session, server_id, active_only=True)
+        server_name = server.name
+    if not inbounds:
+        rows = [
+            [InlineKeyboardButton(text=_("products.v2ray.sync_btn"),
+                                  callback_data=f"{CB_ADD_SYNC}{server_id}")],
+            [InlineKeyboardButton(text=_("products.v2ray.other_server_btn"),
+                                  callback_data=CB_ADD_SRVLIST)],
+            _cancel_row(_),
+        ]
+        await reply.answer(_("products.v2ray.no_inbound"), parse_mode="HTML",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        return
+    rows = [[InlineKeyboardButton(text=_inbound_label(i), callback_data=f"{CB_ADD_INB}{i.id}")]
+            for i in inbounds]
+    rows.append([InlineKeyboardButton(text=_("products.v2ray.other_server_btn"),
+                                      callback_data=CB_ADD_SRVLIST)])
+    rows.append(_cancel_row(_))
+    await state.set_state(ProductAddForm.choosing_inbound)
+    await state.update_data(xui_server_id=server_id, server_name=server_name)
+    await reply.answer(_("products.v2ray.pick_inbound", server=server_name),
+                       reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@router.callback_query(F.data == CB_ADD_SRVLIST)
+async def on_add_server_list(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str],
+    lang: str = "fa", role: Role | None = None,
+) -> None:
+    if not has_permission(role, "manage_products"):
+        await callback.answer(_("products.not_authorized"), show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is not None:
+        await _prompt_server(callback.message, state, _, lang)
+
+
+@router.callback_query(F.data.startswith(CB_ADD_SRV))
+async def on_add_server_chosen(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str],
+    lang: str = "fa", role: Role | None = None,
+) -> None:
+    if not has_permission(role, "manage_products"):
+        await callback.answer(_("products.not_authorized"), show_alert=True)
+        return
+    raw = (callback.data or "")[len(CB_ADD_SRV):]
+    if not raw.isdigit():
+        await callback.answer(_("products.unknown"), show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is not None:
+        await _prompt_inbound(callback.message, state, int(raw), _)
+
+
+@router.callback_query(F.data.startswith(CB_ADD_SYNC))
+async def on_add_sync_hint(
+    callback: CallbackQuery, _: Callable[..., str], role: Role | None = None
+) -> None:
+    # Syncing from inside the bot is intentionally not offered (risky); guide the
+    # admin to the web panel instead.
+    if not has_permission(role, "manage_products"):
+        await callback.answer(_("products.not_authorized"), show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.answer(_("products.v2ray.sync_hint"), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith(CB_ADD_INB))
+async def on_add_inbound_chosen(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str],
+    lang: str = "fa", role: Role | None = None,
+) -> None:
+    if not has_permission(role, "manage_products"):
+        await callback.answer(_("products.not_authorized"), show_alert=True)
+        return
+    raw = (callback.data or "")[len(CB_ADD_INB):]
+    if not raw.isdigit():
+        await callback.answer(_("products.unknown"), show_alert=True)
+        return
+    async with SessionLocal() as session:
+        inbound = await xui_server_service.get_inbound(session, int(raw))
+    if inbound is None:
+        await callback.answer(_("products.unknown"), show_alert=True)
+        return
+    await state.update_data(xui_inbound_id=inbound.id, inbound_remark=_inbound_label(inbound))
+    await state.set_state(ProductAddForm.entering_ip_limit)
+    await callback.answer()
+    if callback.message is not None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=_("products.v2ray.skip_btn"), callback_data=CB_ADD_SKIP_IP)]])
+        await callback.message.answer(_("products.v2ray.ask_ip_limit"), reply_markup=kb)
+
+
+@router.message(ProductAddForm.entering_ip_limit, F.text)
+async def on_ip_limit(
+    message: Message, state: FSMContext, _: Callable[..., str], role: Role | None = None
+) -> None:
+    ip = _parse_positive_int(message.text or "")
+    if ip is None:
+        await message.answer(_("products.invalid_number"))
+        return
+    await state.update_data(ip_limit=ip or None)  # 0 = unlimited
+    await _prompt_description(message, state, _)
+
+
+@router.callback_query(F.data == CB_ADD_SKIP_IP)
+async def on_skip_ip(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str], role: Role | None = None
+) -> None:
+    await state.update_data(ip_limit=None)
+    await callback.answer()
+    if callback.message is not None:
+        await _prompt_description(callback.message, state, _)
+
+
+async def _prompt_description(reply: Message, state: FSMContext, _: Callable[..., str]) -> None:
+    await state.set_state(ProductAddForm.entering_description)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=_("products.v2ray.skip_btn"), callback_data=CB_ADD_SKIP_DESC)]])
+    await reply.answer(_("products.v2ray.ask_description"), reply_markup=kb)
+
+
+@router.message(ProductAddForm.entering_description, F.text)
+async def on_description(
+    message: Message, state: FSMContext, _: Callable[..., str], role: Role | None = None
+) -> None:
+    desc = (message.text or "").strip()
+    await state.update_data(description=desc or None)
     await _finish_create(message, state, _, role)
+
+
+@router.callback_query(F.data == CB_ADD_SKIP_DESC)
+async def on_skip_desc(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str], role: Role | None = None
+) -> None:
+    await state.update_data(description=None)
+    await callback.answer()
+    if callback.message is not None:
+        await _finish_create(callback.message, state, _, role)
+
+
+@router.callback_query(F.data == CB_ADD_CANCEL)
+async def on_add_cancel(
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str], role: Role | None = None
+) -> None:
+    await state.clear()
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.answer(_("products.cancelled"))
+
+
+def _v2ray_created_message(
+    product: Product, data: dict, _: Callable[..., str]
+) -> str:
+    sections: list[tuple[str, object]] = [
+        (_("products.lbl.title"), esc(product.title)),
+        (_("products.lbl.type"), _("product.type.v2ray")),
+        (_("products.lbl.price"), format_money(product.price)),
+        (_("products.lbl.duration"), _("products.duration_value", days=product.duration_days or 0)),
+        (_("products.lbl.traffic"), format_gb(product.traffic_gb)),
+        (_("products.lbl.server"), esc(data.get("server_name") or "—")),
+        (_("products.lbl.inbound"), esc(data.get("inbound_remark") or "—")),
+    ]
+    if product.ip_limit:
+        sections.append((_("products.lbl.ip_limit"), str(product.ip_limit)))
+    if product.description:
+        sections.append((_("products.lbl.description"), esc(product.description)))
+    return render_big_message(_("products.created_title"), sections=sections,
+                              footer=_("products.created_footer"))
 
 
 async def _finish_create(
@@ -272,7 +508,7 @@ async def _finish_create(
         return
     data = await state.get_data()
     await state.clear()
-    tg_user = message.from_user
+    actor_id = data.get("admin_id") or (message.from_user.id if message.from_user else None)
     try:
         async with SessionLocal() as session:
             product = await product_service.create(
@@ -283,15 +519,22 @@ async def _finish_create(
                     price=int(data.get("price", 0)),
                     duration_days=data.get("duration_days"),
                     traffic_gb=data.get("traffic_gb"),
+                    ip_limit=data.get("ip_limit"),
+                    xui_server_id=data.get("xui_server_id"),
+                    xui_inbound_id=data.get("xui_inbound_id"),
+                    description=data.get("description"),
                 ),
                 actor_type="admin",
-                actor_id=tg_user.id if tg_user else None,
+                actor_id=actor_id,
             )
             await session.commit()
     except ValueError as exc:
         await message.answer(_("products.invalid", error=exc))
         return
-    await message.answer(_("products.created", title=product.title))
+    if product.type == "v2ray":
+        await message.answer(_v2ray_created_message(product, data, _), parse_mode="HTML")
+    else:
+        await message.answer(_("products.created", title=product.title))
 
 
 @router.callback_query(F.data.startswith(CB_VIEW))
@@ -310,7 +553,7 @@ async def on_view(
     text = _product_line(product, lang)
     if product.description:
         text += f"\n{product.description}"
-    if isinstance(callback.message, Message):
+    if isinstance(callback.message, Message):  # InaccessibleMessage has no edit_text
         await callback.message.edit_text(
             text, reply_markup=_detail_keyboard(product, lang), parse_mode="HTML"
         )
@@ -387,7 +630,7 @@ async def on_edit_field(
     await state.set_state(ProductEditForm.entering_value)
     await state.update_data(product_id=int(product_id_text), field=field)
     field_label = t(FIELD_BTN_KEYS[field], lang)
-    if isinstance(callback.message, Message):
+    if callback.message is not None:
         await callback.message.answer(_("products.edit_prompt", field=field_label))
     await callback.answer()
 
