@@ -17,6 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards.user import license_section_title
+from app.bot.utils.message_format import divider
 from app.database import SessionLocal
 from app.i18n import menu_texts
 from app.services import (
@@ -65,6 +66,7 @@ async def _account_summary(tg_user, _: Callable[..., str], lang: str) -> tuple[s
     lic_title = await license_section_title(lang)
     lines = [
         _("account.title"),
+        divider(),
         "",
         _("account.name", name=html.escape(name)),
         _("account.telegram_id", id=telegram_id),

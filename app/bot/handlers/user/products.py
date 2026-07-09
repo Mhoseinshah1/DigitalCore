@@ -19,6 +19,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from app.bot.utils.message_format import esc, format_gb, format_money, render_big_message
 from app.database import SessionLocal
 from app.i18n import menu_texts, t
 from app.models.product import Product
@@ -66,24 +67,27 @@ def build_detail_lines(product: Product, server_name: str | None, lang: str) -> 
 def build_invoice_lines(
     product: Product, category_title: str, server_name: str | None, lang: str
 ) -> list[str]:
-    """The step-3 pre-factor (پیش‌فاکتور): a labelled order summary before payment."""
-    lines = [
-        t("products.invoice.title", lang),
-        "",
-        t("products.invoice.product", lang, title=product.title),
-        t("products.invoice.category", lang, category=category_title),
+    """The step-3 pre-factor (پیش‌فاکتور): a large, labelled order summary.
+
+    Rendered in the shared "big message" style — a title, a divider, then each
+    label on its own line above its value — so it reads clearly on a phone.
+    """
+    sections: list[tuple[str, object]] = [
+        (t("products.lbl.product", lang), esc(product.title)),
+        (t("products.lbl.category", lang), esc(category_title)),
     ]
     if product.type == "v2ray":
-        lines.append(t("product.duration_fmt", lang, days=product.duration_days))
-        lines.append(t("product.traffic_fmt", lang, gb=product.traffic_gb))
+        sections.append((t("products.lbl.duration", lang),
+                         t("products.duration_value", lang, days=product.duration_days or 0)))
+        sections.append((t("products.lbl.traffic", lang), format_gb(product.traffic_gb)))
         if product.ip_limit:
-            lines.append(t("product.ip_limit_fmt", lang, n=product.ip_limit))
+            sections.append((t("products.lbl.ip_limit", lang), str(product.ip_limit)))
         if server_name:
-            lines.append(t("product.server_fmt", lang, name=server_name))
+            sections.append((t("products.lbl.server", lang), esc(server_name)))
     if product.description:
-        lines.append(t("products.invoice.description", lang, desc=product.description))
-    lines.append(t("products.invoice.price", lang, price=f"{product.price:,}"))
-    return lines
+        sections.append((t("products.lbl.description", lang), esc(product.description)))
+    sections.append((t("products.lbl.price", lang), format_money(product.price)))
+    return render_big_message(t("products.invoice.title", lang), sections=sections).split("\n")
 
 
 async def render_categories(

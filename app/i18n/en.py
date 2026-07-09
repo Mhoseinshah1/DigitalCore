@@ -141,6 +141,61 @@ CATALOG: dict[str, str] = {
     "products.invalid": "⚠️ Invalid: {error}",
     "products.cancelled": "❌ Cancelled.",
     "products.unknown": "Product not found.",
+    # --- V2Ray product binding (server + inbound) in the admin bot ---
+    "products.v2ray.pick_server": "🧩 Choose the 3X-UI server for this product:",
+    "products.v2ray.pick_inbound": "📡 Choose an inbound on server “{server}”:",
+    "products.v2ray.no_server": (
+        "⚠️ Can't create a V2Ray product\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "No active 3X-UI server is registered.\n\n"
+        "First add a 3X-UI server from the admin panel and test its connection."
+    ),
+    "products.v2ray.no_inbound": (
+        "⚠️ This server has no active inbound\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "To create a V2Ray product you must first sync the server's inbounds."
+    ),
+    "products.v2ray.sync_hint": (
+        "🔄 Sync inbounds\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Open the web admin panel, open the server, and press “Sync inbounds”.\n\n"
+        "Then create the V2Ray product from the bot again."
+    ),
+    "products.v2ray.sync_btn": "🔄 Sync inbounds",
+    "products.v2ray.other_server_btn": "🧩 Choose another server",
+    "products.v2ray.cancel_btn": "❌ Cancel",
+    "products.v2ray.skip_btn": "⏭ Skip",
+    "products.v2ray.ask_ip_limit": (
+        "👥 Enter the user/device limit (a number).\n"
+        "For unlimited, press “⏭ Skip” or send 0."
+    ),
+    "products.v2ray.ask_description": "📝 Enter a product description (optional) or press “⏭ Skip”.",
+    "products.created_title": "✅ Product created successfully",
+    "products.created_footer": "This product is now visible in the bot.",
+    "products.duration_value": "{days} days",
+    "products.lbl.title": "🛍 Title:",
+    "products.lbl.type": "📦 Type:",
+    "products.lbl.price": "💰 Price:",
+    "products.lbl.duration": "⏳ Duration:",
+    "products.lbl.traffic": "🌐 Traffic:",
+    "products.lbl.server": "🧩 Server:",
+    "products.lbl.inbound": "📡 Inbound:",
+    "products.lbl.ip_limit": "👥 Device limit:",
+    "products.lbl.description": "📝 Description:",
+    "products.lbl.product": "🛍 Product:",
+    "products.lbl.category": "📦 Category:",
+    # --- Manual card-to-card receipt (big, readable style) ---
+    "purchase.manual_title": "💳 Card-to-card payment",
+    "purchase.manual_footer": "After paying, tap “I paid” and send a photo or PDF of the receipt.",
+    "purchase.lbl.order": "🧾 Order number:",
+    "purchase.lbl.product": "🛍 Product:",
+    "purchase.lbl.amount": "💰 Amount to pay:",
+    "purchase.lbl.card": "🏦 Card number:",
+    "purchase.lbl.card_owner": "👤 Card holder:",
+    "purchase.lbl.sheba": "🏦 SHEBA:",
+    "purchase.lbl.tracking": "🔎 Tracking code:",
+    "purchase.lbl.original": "🏷 Original amount:",
+    "purchase.lbl.discount": "🏷 Discount:",
     "products.edit_prompt": "Send the new {field} (/cancel to abort):",
     "btn.prod.toggle_active": "🔁 Toggle active",
     "btn.prod.toggle_hidden": "👁 Toggle hidden",

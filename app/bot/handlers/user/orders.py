@@ -30,6 +30,7 @@ from app.bot.payment_ui import (
     manual_receipt_keyboard,
     method_label,
 )
+from app.bot.utils.message_format import esc, format_money, render_big_message, safe_code
 from app.services import (
     coupon_service,
     license_service,
@@ -90,31 +91,32 @@ def _receipt_error_text(exc: ReceiptError, _: Callable[..., str]) -> str:
     return text if text != key else _("purchase.receipt_rejected", error=str(exc))
 
 
-def _payment_instruction_lines(order, product, cfg: dict[str, str], _: Callable[..., str]) -> list[str]:
-    lines = [
-        _("purchase.instructions_title"),
-        "",
-        _("purchase.order_number", number=order.order_number),
-        _("purchase.product", title=product.title),
+def _payment_instruction_lines(
+    order, product, cfg: dict[str, str], _: Callable[..., str], tracking_code: str = ""
+) -> list[str]:
+    """The card-to-card instructions in the shared "big message" style: a title,
+    a divider, each label above its value, the card number as tap-to-copy code,
+    and a clear footer."""
+    sections: list[tuple[str, object]] = [
+        (_("purchase.lbl.order"), esc(order.order_number)),
+        (_("purchase.lbl.product"), esc(product.title)),
     ]
     if order.discount_amount:
-        lines.append(_("purchase.original_amount", amount=f"{order.amount:,}"))
-        lines.append(_("purchase.discount", code=order.coupon_code or "",
-                       amount=f"{order.discount_amount:,}"))
-    lines += [
-        _("purchase.amount", amount=f"{order.final_amount:,}"),
-        "",
-        _("purchase.pay_header"),
-        _("purchase.card_number", card=cfg["card_number"]),
-    ]
+        sections.append((_("purchase.lbl.original"), format_money(order.amount)))
+        sections.append((_("purchase.lbl.discount"), format_money(order.discount_amount)))
+    sections.append((_("purchase.lbl.amount"), format_money(order.final_amount)))
+    sections.append((_("purchase.lbl.card"), safe_code(cfg["card_number"])))
     if cfg.get("card_owner"):
-        lines.append(_("purchase.card_owner", owner=cfg["card_owner"]))
+        sections.append((_("purchase.lbl.card_owner"), esc(cfg["card_owner"])))
     if cfg.get("sheba_number"):
-        lines.append(_("purchase.sheba", sheba=cfg["sheba_number"]))
-    if cfg.get("payment_instructions"):
-        lines.extend(["", cfg["payment_instructions"]])
-    lines.extend(["", _("purchase.ask_receipt")])
-    return lines
+        sections.append((_("purchase.lbl.sheba"), safe_code(cfg["sheba_number"])))
+    if tracking_code:
+        sections.append((_("purchase.lbl.tracking"), safe_code(tracking_code)))
+    # Admin-configured free text (trusted) is shown as-is, below the fields.
+    extra = [cfg["payment_instructions"]] if cfg.get("payment_instructions") else None
+    message = render_big_message(_("purchase.manual_title"), sections=sections,
+                                 lines=extra, footer=_("purchase.manual_footer"))
+    return message.split("\n")
 
 
 CB_PAY_CARD = "upayc:"
@@ -220,6 +222,9 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
         tracking_code = payment.tracking_code if payment is not None else ""
 
         # Admin-configurable card text (falls back to the legacy built-in lines).
+        # The template itself is admin-authored (may contain HTML); the injected
+        # user-controlled value (username) is HTML-escaped so it can't break the
+        # HTML parse or inject markup.
         template = (await svc.get_str("manual_receipt_text", "")).strip()
         if template:
             text = render_text_template(template, {
@@ -229,13 +234,11 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
                 "tracking_code": tracking_code,
                 "invoice_number": invoice.invoice_number,
                 "order_number": order.order_number,
-                "username": tg_user.username or (tg_user.first_name or ""),
+                "username": esc(tg_user.username or (tg_user.first_name or "")),
             })
             lines = [text, "", _("purchase.tracking_code", code=tracking_code)]
         else:
-            lines = _payment_instruction_lines(order, product, cfg, _)
-            if tracking_code:
-                lines += ["", _("purchase.tracking_code", code=tracking_code)]
+            lines = _payment_instruction_lines(order, product, cfg, _, tracking_code)
         card_number = cfg["card_number"]
         final_amount = int(order.final_amount or 0)
         order_id = order.id
