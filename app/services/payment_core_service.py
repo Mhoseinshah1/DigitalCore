@@ -214,29 +214,98 @@ async def get_active_payment_methods(
     """
     svc = SettingsService(session)
     out: list[PaymentMethod] = []
+    dropped: list[str] = []
     approved_count: int | None = None
     for method in await list_methods(session):
         if not method.is_active:
+            dropped.append(f"{method.code}:inactive")
             continue
         if exclude_wallet and method.method_type == "wallet":
+            dropped.append(f"{method.code}:wallet-excluded")
             continue
         setting_key = _METHOD_TYPE_SETTING.get(method.method_type)
         if setting_key and not await svc.get_bool(setting_key, True):
+            dropped.append(f"{method.code}:setting-off({setting_key})")
             continue
         if method.min_amount and amount < int(method.min_amount):
+            dropped.append(f"{method.code}:below-min({method.min_amount})")
             continue
         if method.max_amount and amount > int(method.max_amount):
+            dropped.append(f"{method.code}:above-max({method.max_amount})")
             continue
         needed = int(method.activate_after_payments or 0)
         if needed > 0:
             if user is None:
+                dropped.append(f"{method.code}:needs-{needed}-payments(anon)")
                 continue
             if approved_count is None:
                 approved_count = await _count_approved_payments(session, user.id)
             if approved_count < needed:
+                dropped.append(f"{method.code}:needs-{needed}-has-{approved_count}")
                 continue
         out.append(method)
+    # Debug-safe: codes + reasons only, never secrets.
+    log.info("active payment methods amount=%s exclude_wallet=%s -> %d shown [%s]; dropped [%s]",
+             amount, exclude_wallet, len(out), ",".join(m.code for m in out) or "-",
+             ",".join(dropped) or "-")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Bot-facing resolver: ordered method_types to OFFER, with a settings-derived
+# fallback when the PaymentMethod table has no rows (fresh/older DB where the
+# 0021 seed never ran). Keeps the bot from ever showing zero methods.
+# ---------------------------------------------------------------------------
+_FALLBACK_ORDER: tuple[str, ...] = (
+    "wallet", "manual_receipt", "online_gateway", "custom_gateway",
+)
+
+
+async def _any_methods(session: AsyncSession) -> bool:
+    return bool(await session.scalar(select(func.count(PaymentMethod.id))) or 0)
+
+
+async def _settings_fallback_types(
+    session: AsyncSession, *, exclude_wallet: bool
+) -> list[str]:
+    """Legacy settings-driven method types (used only when no rows are seeded)."""
+    svc = SettingsService(session)
+    types: list[str] = []
+    if not exclude_wallet and await svc.get_bool("wallet_enabled", True) \
+            and await svc.get_bool("wallet_payment_enabled", True):
+        types.append("wallet")
+    if await svc.get_bool("card_to_card_enabled", True) \
+            and (await svc.get_str("card_number", "")).strip():
+        types.append("manual_receipt")
+    if await svc.get_bool("online_gateway_enabled", False):
+        types.append("online_gateway")
+    if await svc.get_bool("custom_gateway_enabled", False):
+        types.append("custom_gateway")
+    return types
+
+
+async def resolve_method_types(
+    session: AsyncSession, amount: int, user: User | None = None,
+    *, exclude_wallet: bool = False,
+) -> list[str]:
+    """Ordered payment `method_type`s to offer for `amount`.
+
+    Table-driven via :func:`get_active_payment_methods`; if the table is empty
+    (never seeded) it falls back to the settings-derived defaults so the bot
+    still offers wallet / card / enabled gateways instead of nothing.
+    """
+    amount = int(amount)
+    if await _any_methods(session):
+        methods = await get_active_payment_methods(
+            session, amount, user, exclude_wallet=exclude_wallet)
+        types = [m.method_type for m in methods]
+        source = "db"
+    else:
+        types = await _settings_fallback_types(session, exclude_wallet=exclude_wallet)
+        source = "settings-fallback"
+    log.info("resolve_method_types amount=%s exclude_wallet=%s via %s -> %s",
+             amount, exclude_wallet, source, ",".join(types) or "none")
+    return types
 
 
 # --------------------------------------------------------------------------

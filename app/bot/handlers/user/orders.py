@@ -25,10 +25,16 @@ from app.core.settings_service import SettingsService
 from app.core.statuses import order_status_label
 from app.database import SessionLocal
 from app.i18n import menu_texts, t
+from app.bot.payment_ui import (
+    UNIMPLEMENTED_GATEWAY_TYPES,
+    manual_receipt_keyboard,
+    method_label,
+)
 from app.services import (
     coupon_service,
     license_service,
     order_service,
+    payment_core_service,
     payment_service,
     product_service,
     user_service,
@@ -119,6 +125,22 @@ CB_PAY_WALLET = "upayw:"
 CB_INV_WALLET = "uinvw:"
 CB_INV_CARD = "uinvc:"
 CB_INV_GATEWAY = "uinvg:"
+# Extra (not-yet-connected) gateway methods surfaced from the PaymentMethod
+# table: data is ``uinv2:<method_type>:<product_id>``.
+CB_INV_GW2 = "uinv2:"
+CB_PAY_BACK = "upayback"  # «بازگشت» from a card-to-card instructions screen
+
+# method_type -> (invoice callback prefix). Types not here use CB_INV_GW2.
+_INV_CALLBACK: dict[str, str] = {
+    "wallet": CB_INV_WALLET,
+    "manual_receipt": CB_INV_CARD,
+    "online_gateway": CB_INV_GATEWAY,
+}
+# method_type -> (post-coupon direct-purchase callback prefix).
+_PAY_CALLBACK: dict[str, str] = {
+    "wallet": "upayw:",       # CB_PAY_WALLET (defined above)
+    "manual_receipt": "upayc:",  # CB_PAY_CARD
+}
 
 
 async def _apply_coupon_best_effort(session, order_id: int, coupon_code: str | None,
@@ -222,14 +244,9 @@ async def _start_card_payment(reply, tg_user, product_id: int, _: Callable[..., 
     await state.update_data(order_id=order_id, card_number=card_number,
                             pay_amount=final_amount)
     if reply is not None:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=_("purchase.btn.copy_amount"),
-                                  callback_data="paycpa"),
-             InlineKeyboardButton(text=_("purchase.btn.copy_card"),
-                                  callback_data="paycpc")],
-            [InlineKeyboardButton(text=_("purchase.btn.paid"),
-                                  callback_data="paydone")],
-        ])
+        keyboard = manual_receipt_keyboard(
+            _, amount=final_amount, card_number=card_number,
+            paid_cb="paydone", back_cb=CB_PAY_BACK)
         await reply.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
 
 
@@ -307,60 +324,89 @@ async def _pay_with_wallet(reply, tg_user, product_id: int, _: Callable[..., str
                            parse_mode="HTML")
 
 
+async def _product_price(session, product_id: int) -> int:
+    product = await product_service.get(session, product_id)
+    return int(product.price or 0) if product is not None else 0
+
+
 async def _offer_payment_methods(reply, tg_user, product_id: int, _: Callable[..., str],
                                  state: FSMContext, bot, *, coupon_code: str | None) -> None:
-    """Show the card/wallet picker, or go straight to the only enabled method.
-    The chosen coupon is stashed in FSM so the picker callbacks can read it."""
+    """Show every active payment method, or go straight to the only one.
+
+    Methods come from the shared resolver (PaymentMethod table + settings), so
+    wallet, card-to-card and every enabled gateway appear — not just card. The
+    chosen coupon is stashed in FSM so the picker callbacks can read it."""
     async with SessionLocal() as session:
-        svc = SettingsService(session)
-        card_ok = (await svc.get_bool("card_to_card_enabled", True)
-                   and bool((await svc.get_str("card_number", "")).strip()))
-        wallet_ok = (await svc.get_bool("wallet_enabled", True)
-                     and await svc.get_bool("wallet_payment_enabled", True))
+        amount = await _product_price(session, product_id)
+        user = await user_service.get_by_telegram_id(session, tg_user.id)
+        types = await payment_core_service.resolve_method_types(session, amount, user)
     await state.update_data(buy_product_id=product_id, buy_coupon=coupon_code)
-    if wallet_ok and card_ok:
-        if reply is not None:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=_("purchase.method.card"),
-                                      callback_data=f"{CB_PAY_CARD}{product_id}")],
-                [InlineKeyboardButton(text=_("purchase.method.wallet"),
-                                      callback_data=f"{CB_PAY_WALLET}{product_id}")],
-            ])
-            await reply.answer(_("purchase.choose_method"), reply_markup=kb)
-        return
-    if wallet_ok:
+
+    # Exactly one → skip the picker and dispatch straight to it.
+    if types == ["wallet"]:
         await _pay_with_wallet(reply, tg_user, product_id, _, bot, coupon_code=coupon_code)
         return
-    await _start_card_payment(reply, tg_user, product_id, _, state, coupon_code=coupon_code)
+    if types == ["manual_receipt"]:
+        await _start_card_payment(reply, tg_user, product_id, _, state, coupon_code=coupon_code)
+        return
+    if not types:
+        if reply is not None:
+            await reply.answer(_("products.invoice.no_methods"))
+        return
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for mtype in types:
+        rows.append([InlineKeyboardButton(
+            text=method_label(_, mtype),
+            callback_data=_pay_method_cb(mtype, product_id))])
+    if reply is not None:
+        await reply.answer(_("purchase.choose_method"),
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+def _pay_method_cb(method_type: str, product_id: int) -> str:
+    """Callback for a post-coupon method button (wallet/card direct, else gateway)."""
+    prefix = _PAY_CALLBACK.get(method_type)
+    if prefix:
+        return f"{prefix}{product_id}"
+    return f"{CB_INV_GW2}{method_type}:{product_id}"
 
 
 async def payment_method_rows(
     session, product_id: int, _: Callable[..., str]
 ) -> tuple[list[list[InlineKeyboardButton]], str | None]:
-    """Invoice payment buttons for the currently enabled methods (bot UX).
+    """Invoice payment buttons for every active method (bot UX).
 
-    Returns ``(rows, note)``. ``note`` is a clear message when no payment method
-    is available so the invoice never dead-ends with a lone Back button.
+    Driven by the shared resolver (PaymentMethod table + settings fallback):
+    wallet, card-to-card, online/custom gateway, crypto, Telegram Stars — each
+    active method gets a button. ``note`` is a clear message when nothing is
+    available so the invoice never dead-ends with a lone Back button.
     """
-    svc = SettingsService(session)
-    card_ok = (await svc.get_bool("card_to_card_enabled", True)
-               and bool((await svc.get_str("card_number", "")).strip()))
-    wallet_ok = (await svc.get_bool("wallet_enabled", True)
-                 and await svc.get_bool("wallet_payment_enabled", True))
-    gateway_ok = await svc.get_bool("online_gateway_enabled", False)
-
+    amount = await _product_price(session, product_id)
+    types = await payment_core_service.resolve_method_types(session, amount, user=None)
     rows: list[list[InlineKeyboardButton]] = []
-    if wallet_ok:
-        rows.append([InlineKeyboardButton(
-            text=_("btn.pay_wallet"), callback_data=f"{CB_INV_WALLET}{product_id}")])
-    if card_ok:
-        rows.append([InlineKeyboardButton(
-            text=_("btn.pay_card"), callback_data=f"{CB_INV_CARD}{product_id}")])
-    if gateway_ok:
-        rows.append([InlineKeyboardButton(
-            text=_("btn.pay_gateway"), callback_data=f"{CB_INV_GATEWAY}{product_id}")])
+    for mtype in types:
+        prefix = _INV_CALLBACK.get(mtype)
+        cb = f"{prefix}{product_id}" if prefix else f"{CB_INV_GW2}{mtype}:{product_id}"
+        rows.append([InlineKeyboardButton(text=method_label(_, mtype), callback_data=cb)])
     note = None if rows else _("products.invoice.no_methods")
     return rows, note
+
+
+@router.callback_query(F.data.startswith(CB_INV_GW2))
+async def on_inv_extra_gateway(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa"
+) -> None:
+    """A not-yet-connected gateway method (custom/crypto/stars/online) was tapped.
+
+    We never dead-end: show a clear Persian notice that the gateway isn't wired
+    to a provider yet (the safe placeholder behaviour the owner asked for)."""
+    raw = (callback.data or "")[len(CB_INV_GW2):]
+    method_type = raw.split(":", 1)[0]
+    if method_type in UNIMPLEMENTED_GATEWAY_TYPES:
+        await callback.answer(_("gateway.not_connected"), show_alert=True)
+    else:  # unknown/none — safe fallback, still never silent
+        await callback.answer(_("gateway.not_connected"), show_alert=True)
 
 
 async def _dispatch_method(reply, tg_user, product_id: int, method: str,
@@ -716,6 +762,22 @@ def _extract_file(message: Message) -> tuple[str, str, str | None, int] | None:
 
 
 async def _handle_receipt(
+    message: Message, bot: Bot, _: Callable[..., str], state: FSMContext,
+    lang: str, order_id: int | None,
+) -> None:
+    """Robust wrapper: ANY unexpected failure still replies + never strands the
+    user (the FSM stays in waiting_for_receipt so they can simply resend)."""
+    try:
+        await _handle_receipt_inner(message, bot, _, state, lang, order_id)
+    except Exception as exc:  # noqa: BLE001 - a receipt must never dead-end the user
+        log.exception("Unexpected receipt handling error: %s", exc)
+        try:
+            await message.answer(_("purchase.receipt_failed"))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _handle_receipt_inner(
     message: Message, bot: Bot, _: Callable[..., str], state: FSMContext,
     lang: str, order_id: int | None,
 ) -> None:
@@ -1160,17 +1222,26 @@ async def on_list_close(
 
 
 # --------------------------------------------------------------------------
-# Payment Core: card-flow helper buttons. Telegram can't put text on the
-# clipboard from an ordinary inline button, so "copy" answers with the value
-# in a popup the user can long-press-copy from.
+# Payment Core: card-flow helper buttons.
+#
+# On aiogram/Bot API builds with copy_text the copy buttons copy client-side and
+# never reach these callbacks (see payment_ui.build_copy_button). These handlers
+# are the fallback for older clients: they echo the value in a monospace code
+# block the user can tap-and-hold to copy — we never pretend a copy happened.
 # --------------------------------------------------------------------------
+async def _send_copyable(callback: CallbackQuery, value: str, popup: str) -> None:
+    await callback.answer(popup, show_alert=False)
+    if callback.message is not None and value:
+        await callback.message.answer(f"<code>{value}</code>", parse_mode="HTML")
+
+
 @router.callback_query(F.data == "paycpa")
 async def on_copy_amount(callback: CallbackQuery, _: Callable[..., str],
                          state: FSMContext) -> None:
     data = await state.get_data()
     amount = int(data.get("pay_amount") or 0)
-    await callback.answer(_("purchase.copy_amount_popup", amount=f"{amount:,}"),
-                          show_alert=True)
+    await _send_copyable(callback, str(amount),
+                         _("purchase.copy_amount_popup", amount=f"{amount:,}"))
 
 
 @router.callback_query(F.data == "paycpc")
@@ -1178,7 +1249,7 @@ async def on_copy_card(callback: CallbackQuery, _: Callable[..., str],
                        state: FSMContext) -> None:
     data = await state.get_data()
     card = str(data.get("card_number") or "")
-    await callback.answer(_("purchase.copy_card_popup", card=card), show_alert=True)
+    await _send_copyable(callback, card, _("purchase.copy_card_popup", card=card))
 
 
 @router.callback_query(F.data == "paydone")
@@ -1189,3 +1260,13 @@ async def on_paid_pressed(callback: CallbackQuery, _: Callable[..., str],
     if callback.message is not None:
         await callback.message.answer(_("purchase.send_receipt_now"))
     await callback.answer()
+
+
+@router.callback_query(F.data == CB_PAY_BACK)
+async def on_pay_back(callback: CallbackQuery, _: Callable[..., str],
+                      state: FSMContext, lang: str = "fa") -> None:
+    """«بازگشت» from the card-to-card screen: leave the receipt-wait state."""
+    await state.clear()
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.answer(_("purchase.card_cancelled"))

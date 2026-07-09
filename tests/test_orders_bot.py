@@ -144,11 +144,15 @@ async def test_buy_creates_order_and_shows_instructions(bot_db) -> None:
 
 
 async def test_buy_blocks_when_card_not_configured(bot_db) -> None:
+    # Wallet payment off (fixture) + card number empty + no gateways enabled and
+    # no PaymentMethod rows seeded → the resolver finds nothing to offer, so the
+    # multi-method flow shows the safe "no methods available" notice (it must
+    # never dead-end with only a Back button).
     pid = await _seed_product(bot_db, card="")  # empty card number
     msg = FakeMessage(FakeUser(4002))
     cb = FakeCallback(f"ubuy:{pid}", FakeUser(4002), msg)
     await on_buy(cb, FakeBot(), FA, FakeState(), lang="fa")
-    assert msg.answers == [FA("purchase.not_configured")]
+    assert msg.answers == [FA("products.invoice.no_methods")]
 
 
 async def test_receipt_submission_flow(bot_db) -> None:
