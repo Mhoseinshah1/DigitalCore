@@ -145,6 +145,11 @@
           </option>
           {% endfor %}
         </select>
+        <small class="muted" id="inbound-pick-server-hint">{{ _("web.products.form.pick_server_first") }}</small>
+        <small class="muted" id="inbound-empty-hint" style="display:none">
+          {{ _("web.products.form.no_synced_inbounds") }}
+          <a id="inbound-sync-link" href="/admin/xui-servers">{{ _("web.products.form.sync_inbounds_link") }}</a>
+        </small>
       </div>
     </div>
   </section>
@@ -188,6 +193,18 @@
       toggleAction();
     }
 
+    var pickServerHint = document.getElementById('inbound-pick-server-hint');
+    var emptyHint = document.getElementById('inbound-empty-hint');
+    var syncLink = document.getElementById('inbound-sync-link');
+
+    function setHints(sid, count) {
+      // No server chosen → «pick a server first»; server chosen but 0 synced
+      // inbounds → «none synced yet» + a link to sync that server's inbounds.
+      if (pickServerHint) { pickServerHint.style.display = sid ? 'none' : ''; }
+      if (emptyHint) { emptyHint.style.display = (sid && count === 0) ? '' : 'none'; }
+      if (syncLink && sid) { syncLink.href = '/admin/xui-servers/' + sid + '/inbounds'; }
+    }
+
     function loadInbounds(preselect) {
       var sid = serverSel.value;
       // Reset to just the placeholder.
@@ -196,13 +213,14 @@
       opt0.value = '';
       opt0.textContent = pickInbound;
       inboundSel.appendChild(opt0);
-      if (!sid) { return; }
+      if (!sid) { setHints('', 0); return; }
       fetch(serverSel.getAttribute('data-inbounds-url') + '/' + sid + '/inbounds', {
         headers: {'Accept': 'application/json'}, credentials: 'same-origin'
       })
         .then(function (r) { return r.ok ? r.json() : {inbounds: []}; })
         .then(function (data) {
-          (data.inbounds || []).forEach(function (ib) {
+          var list = data.inbounds || [];
+          list.forEach(function (ib) {
             var o = document.createElement('option');
             o.value = ib.id;
             var label = '#' + ib.inbound_id;
@@ -212,8 +230,9 @@
             if (preselect && String(ib.id) === String(preselect)) { o.selected = true; }
             inboundSel.appendChild(o);
           });
+          setHints(sid, list.length);
         })
-        .catch(function () { /* leave placeholder only */ });
+        .catch(function () { setHints(sid, 0); });
     }
 
     if (appliesChk) { appliesChk.addEventListener('change', toggleAction); }
@@ -221,6 +240,10 @@
     if (serverSel) {
       // On manual server change, refetch the active inbound list (no preselect).
       serverSel.addEventListener('change', function () { loadInbounds(null); });
+      // Initial hint state (edit forms already have server-rendered options).
+      var rendered = inboundSel
+        ? inboundSel.querySelectorAll('option[value]:not([value=""])').length : 0;
+      setHints(serverSel.value, rendered);
     }
   })();
 </script>

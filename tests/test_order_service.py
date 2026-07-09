@@ -107,6 +107,61 @@ async def test_cannot_order_v2ray_without_binding(db_session) -> None:
     assert ei.value.code == "product_misconfigured"
 
 
+async def _bound_v2ray(db_session, *, server_active=True, inbound_active=True, bind=True):
+    """A v2ray product bound to a server + inbound (Phase 2: auto-synced)."""
+    from app.models import XuiInbound, XuiServer
+    srv = XuiServer(name="Germany", base_url="http://p", is_active=server_active,
+                    status="active")
+    db_session.add(srv)
+    await db_session.flush()
+    inb = XuiInbound(server_id=srv.id, inbound_id=7, remark="R", protocol="vless",
+                     is_active=inbound_active)
+    db_session.add(inb)
+    await db_session.flush()
+    p = Product(type="v2ray", title="VPN", price=90_000, duration_days=30,
+                traffic_gb=50, is_active=True, is_hidden=False,
+                xui_server_id=srv.id if bind else None,
+                xui_inbound_id=inb.id if bind else None)
+    db_session.add(p)
+    await db_session.flush()
+    return p, srv, inb
+
+
+async def test_can_order_v2ray_with_active_binding(db_session) -> None:
+    u = await _user(db_session)
+    p, _srv, _inb = await _bound_v2ray(db_session)
+    order = await order_service.create_order(db_session, u.id, p.id)
+    await db_session.commit()
+    assert order.status == "pending_payment" and order.amount == 90_000
+
+
+async def test_cannot_order_v2ray_with_inactive_inbound(db_session) -> None:
+    # Inbound present but disabled locally (removed from sale) → never charge.
+    u = await _user(db_session)
+    p, _srv, _inb = await _bound_v2ray(db_session, inbound_active=False)
+    with pytest.raises(OrderError) as ei:
+        await order_service.create_order(db_session, u.id, p.id)
+    assert ei.value.code == "product_inbound_invalid"
+
+
+async def test_cannot_order_v2ray_with_inactive_server(db_session) -> None:
+    u = await _user(db_session)
+    p, _srv, _inb = await _bound_v2ray(db_session, server_active=False)
+    with pytest.raises(OrderError) as ei:
+        await order_service.create_order(db_session, u.id, p.id)
+    assert ei.value.code == "product_inbound_invalid"
+
+
+async def test_cannot_order_v2ray_with_deleted_inbound(db_session) -> None:
+    u = await _user(db_session)
+    p, _srv, inb = await _bound_v2ray(db_session)
+    await db_session.delete(inb)
+    await db_session.flush()
+    with pytest.raises(OrderError) as ei:
+        await order_service.create_order(db_session, u.id, p.id)
+    assert ei.value.code == "product_inbound_invalid"
+
+
 async def test_supported_payment_methods(db_session) -> None:
     u = await _user(db_session)
     p = await _license(db_session)

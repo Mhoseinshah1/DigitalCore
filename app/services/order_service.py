@@ -118,11 +118,25 @@ async def create_order(
                 "this product requires an existing service", code="requires_service")
         # New V2Ray service orders must already be bound to a server + inbound
         # (Phase 2.1). We do NOT create the client yet — we only refuse to sell a
-        # misconfigured one.
-        if product.type == "v2ray" and (
-                not product.xui_server_id or not product.xui_inbound_id):
-            raise OrderError(
-                "this V2Ray product is not fully configured", code="product_misconfigured")
+        # misconfigured one, so the buyer's wallet is never charged for it.
+        if product.type == "v2ray":
+            if not product.xui_server_id or not product.xui_inbound_id:
+                raise OrderError(
+                    "this V2Ray product is not fully configured",
+                    code="product_misconfigured")
+            # The bound inbound must still exist, belong to its server, and be
+            # active locally + on an active server. A product wired to a deleted
+            # or disabled inbound must never take a payment.
+            from app.models.xui_inbound import XuiInbound
+            from app.models.xui_server import XuiServer
+            server = await session.get(XuiServer, product.xui_server_id)
+            inbound = await session.get(XuiInbound, product.xui_inbound_id)
+            if (server is None or inbound is None
+                    or inbound.server_id != server.id
+                    or not server.is_active or not inbound.is_active):
+                raise OrderError(
+                    "this V2Ray product is not bound to a valid inbound",
+                    code="product_inbound_invalid")
 
     discount_amount = 0
     final_amount = price - discount_amount

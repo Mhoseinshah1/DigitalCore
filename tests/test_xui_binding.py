@@ -249,6 +249,22 @@ async def test_admin_full_server_and_inbound_flow(client_with_role) -> None:
 
     r = await client.get("/admin/xui-servers/1/inbounds")
     assert r.status_code == 200 and "primary" in r.text
+    # The inbounds page no longer offers manual add/edit — only sync + local toggle.
+    assert "/inbounds/create" not in r.text          # no «add inbound» affordance
+    assert "/xui-inbounds/1/edit" not in r.text       # no manual edit link
+    assert "sync-inbounds" in r.text                  # «Sync from panel» button present
+
+    # The manual create form page (GET) is gone (only the programmatic POST remains).
+    assert (await client.get("/admin/xui-servers/1/inbounds/create")).status_code in (404, 405)
+    # The manual edit form/route is gone entirely.
+    assert (await client.get("/admin/xui-inbounds/1/edit")).status_code == 404
+    assert (await client.post("/admin/xui-inbounds/1/edit", follow_redirects=False)).status_code == 404
+
+    # A locally-disabled inbound can be re-enabled for sale (no remote change).
+    r = await client.post("/admin/xui-inbounds/1/deactivate", follow_redirects=False)
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
+    r = await client.post("/admin/xui-inbounds/1/activate", follow_redirects=False)
+    assert r.status_code == 303 and "saved=1" in r.headers["location"]
 
     # Deactivate the server (soft).
     r = await client.post("/admin/xui-servers/1/deactivate", follow_redirects=False)

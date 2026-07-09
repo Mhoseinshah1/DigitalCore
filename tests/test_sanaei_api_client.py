@@ -203,3 +203,51 @@ async def test_secrets_not_logged(caplog) -> None:
         async with make_client(handler, api_token="super-secret-token") as c:
             await c.list_inbounds()
     assert "super-secret-token" not in caplog.text
+
+
+# --------------------------------------------------------------------------
+# list_inbounds hardening: endpoint fallback + response-wrapper variants
+# --------------------------------------------------------------------------
+async def test_list_inbounds_falls_back_to_alt_path_on_404() -> None:
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if req.url.path.endswith("/panel/api/inbounds/list"):
+            return httpx.Response(404, text="not found")
+        if req.url.path.endswith("/panel/api/inbounds"):
+            return _ok([{"id": 5}])
+        return _ok(None)
+
+    async with make_client(handler, api_token="t") as c:
+        inbounds = await c.list_inbounds()
+    assert inbounds == [{"id": 5}]
+    assert any(p.endswith("/panel/api/inbounds/list") for p in seen)  # tried primary first
+    assert any(p.endswith("/panel/api/inbounds") for p in seen)       # then the fallback
+
+
+async def test_list_inbounds_unwraps_nested_list_property() -> None:
+    # Some panels answer {success, obj:{inbounds:[...]}} instead of a bare list.
+    def handler(req: httpx.Request) -> httpx.Response:
+        return _ok({"inbounds": [{"id": 1}, {"id": 2}], "total": 2})
+
+    async with make_client(handler, api_token="t") as c:
+        inbounds = await c.list_inbounds()
+    assert inbounds == [{"id": 1}, {"id": 2}]
+
+
+async def test_list_inbounds_unwraps_list_key_and_drops_non_dicts() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return _ok({"list": [{"id": 3}, "garbage", None, {"id": 4}]})
+
+    async with make_client(handler, api_token="t") as c:
+        inbounds = await c.list_inbounds()
+    assert inbounds == [{"id": 3}, {"id": 4}]
+
+
+async def test_list_inbounds_empty_on_unexpected_shape() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return _ok("not a list or dict")
+
+    async with make_client(handler, api_token="t") as c:
+        assert await c.list_inbounds() == []

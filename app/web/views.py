@@ -1481,6 +1481,16 @@ async def xui_server_test(
     result = await xui_server_service.test_connection(session, server_id, actor_id=admin.id)
     await session.commit()
     message = str(result.get("message", ""))
+    # A healthy panel is immediately synced too (owner requirement: adding/testing
+    # a server auto-discovers its inbounds — the admin never adds them by hand).
+    if result.get("ok"):
+        sync = await xui_server_service.sync_inbounds(session, server_id, actor_id=admin.id)
+        await session.commit()
+        if sync.get("ok"):
+            return RedirectResponse(
+                f"/admin/xui-servers?tested={quote(message)}&synced={sync.get('count', 0)}",
+                status_code=303,
+            )
     return RedirectResponse(
         f"/admin/xui-servers?tested={quote(message)}", status_code=303
     )
@@ -1496,8 +1506,17 @@ async def xui_server_sync(
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
+    form = dict(await request.form())
     result = await xui_server_service.sync_inbounds(session, server_id, actor_id=admin.id)
     await session.commit()
+    # The «Sync from panel» button on the inbounds page returns there; the servers
+    # list button returns to the list.
+    if form.get("next") == "inbounds":
+        base = f"/admin/xui-servers/{server_id}/inbounds"
+        if not result.get("ok"):
+            return RedirectResponse(
+                f"{base}?error={quote(str(result.get('message', '')))}", status_code=303)
+        return RedirectResponse(f"{base}?saved=1", status_code=303)
     if not result.get("ok"):
         return RedirectResponse(
             f"/admin/xui-servers?error={quote(str(result.get('message', '')))}",
@@ -1554,25 +1573,6 @@ async def xui_server_inbounds_page(
     )
 
 
-@router.get("/xui-servers/{server_id}/inbounds/create", response_class=HTMLResponse)
-async def xui_inbound_new_page(
-    server_id: int,
-    request: Request,
-    admin: Admin | None = Depends(get_current_admin_optional),
-    session: AsyncSession = Depends(get_session),
-):
-    lang, deny = _guard(request, admin, "manage_xui")
-    if deny:
-        return deny
-    server = await xui_server_service.get_server(session, server_id)
-    if server is None:
-        return RedirectResponse("/admin/xui-servers", status_code=302)
-    return render_template(
-        "xui_inbound_form.html",
-        _ctx(request, admin, server=server, inbound=None, error=""),
-    )
-
-
 @router.post("/xui-servers/{server_id}/inbounds/create")
 async def xui_inbound_create_submit(
     server_id: int,
@@ -1580,6 +1580,13 @@ async def xui_inbound_create_submit(
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
 ):
+    """Internal/programmatic inbound insert.
+
+    Not linked from the admin UI: admins never type inbound IDs. Inbounds are
+    discovered from the panel via «Sync from panel». This endpoint is retained
+    only for scripted seeding / migrations; the local ``is_active`` toggle below
+    is what admins use to control which synced inbounds are sellable.
+    """
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
@@ -1609,64 +1616,6 @@ async def xui_inbound_create_submit(
     )
 
 
-@router.get("/xui-inbounds/{inbound_record_id}/edit", response_class=HTMLResponse)
-async def xui_inbound_edit_page(
-    inbound_record_id: int,
-    request: Request,
-    admin: Admin | None = Depends(get_current_admin_optional),
-    session: AsyncSession = Depends(get_session),
-):
-    lang, deny = _guard(request, admin, "manage_xui")
-    if deny:
-        return deny
-    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
-    if inbound is None:
-        return RedirectResponse("/admin/xui-servers", status_code=302)
-    server = await xui_server_service.get_server(session, inbound.server_id)
-    return render_template(
-        "xui_inbound_form.html",
-        _ctx(request, admin, server=server, inbound=inbound, error=""),
-    )
-
-
-@router.post("/xui-inbounds/{inbound_record_id}/edit")
-async def xui_inbound_edit_submit(
-    inbound_record_id: int,
-    request: Request,
-    admin: Admin | None = Depends(get_current_admin_optional),
-    session: AsyncSession = Depends(get_session),
-):
-    lang, deny = _guard(request, admin, "manage_xui")
-    if deny:
-        return deny
-    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
-    if inbound is None:
-        return RedirectResponse("/admin/xui-servers", status_code=302)
-    server_id = inbound.server_id
-    form = dict(await request.form())
-    try:
-        await xui_server_service.update_inbound(
-            session, inbound_record_id,
-            inbound_id=_parse_int_opt(form.get("inbound_id")),
-            remark=str(form.get("remark", "")).strip() or None,
-            protocol=str(form.get("protocol", "")).strip() or None,
-            port=_parse_int_opt(form.get("port")),
-            network=str(form.get("network", "")).strip() or None,
-            security=str(form.get("security", "")).strip() or None,
-            is_active="is_active" in form,
-            actor_id=admin.id,
-        )
-        await session.commit()
-    except (ValueError, TypeError) as exc:
-        return RedirectResponse(
-            f"/admin/xui-servers/{server_id}/inbounds?error={quote(str(exc))}",
-            status_code=303,
-        )
-    return RedirectResponse(
-        f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303
-    )
-
-
 @router.post("/xui-inbounds/{inbound_record_id}/deactivate")
 async def xui_inbound_deactivate(
     inbound_record_id: int,
@@ -1674,6 +1623,7 @@ async def xui_inbound_deactivate(
     admin: Admin | None = Depends(get_current_admin_optional),
     session: AsyncSession = Depends(get_session),
 ):
+    """Locally hide a synced inbound from sales (does NOT touch the remote panel)."""
     lang, deny = _guard(request, admin, "manage_xui")
     if deny:
         return deny
@@ -1682,6 +1632,29 @@ async def xui_inbound_deactivate(
         return RedirectResponse("/admin/xui-servers", status_code=302)
     server_id = inbound.server_id
     await xui_server_service.deactivate_inbound(session, inbound_record_id, actor_id=admin.id)
+    await session.commit()
+    return RedirectResponse(
+        f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303
+    )
+
+
+@router.post("/xui-inbounds/{inbound_record_id}/activate")
+async def xui_inbound_activate(
+    inbound_record_id: int,
+    request: Request,
+    admin: Admin | None = Depends(get_current_admin_optional),
+    session: AsyncSession = Depends(get_session),
+):
+    """Re-enable a locally-disabled synced inbound for sales."""
+    lang, deny = _guard(request, admin, "manage_xui")
+    if deny:
+        return deny
+    inbound = await xui_server_service.get_inbound(session, inbound_record_id)
+    if inbound is None:
+        return RedirectResponse("/admin/xui-servers", status_code=302)
+    server_id = inbound.server_id
+    await xui_server_service.update_inbound(
+        session, inbound_record_id, is_active=True, actor_id=admin.id)
     await session.commit()
     return RedirectResponse(
         f"/admin/xui-servers/{server_id}/inbounds?saved=1", status_code=303

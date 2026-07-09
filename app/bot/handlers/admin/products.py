@@ -23,7 +23,7 @@ from app.i18n import t, texts_for
 from app.models.product import PRODUCT_TYPES, Product
 from app.models.xui_inbound import XuiInbound
 from app.schemas.product import ProductCreate, ProductUpdate
-from app.services import product_service, xui_server_service
+from app.services import product_service, xui_inbound_sync_service, xui_server_service
 
 log = logging.getLogger("bot.products")
 
@@ -292,10 +292,13 @@ def _server_label(server) -> str:
 
 def _inbound_label(inbound: XuiInbound) -> str:
     name = inbound.remark or inbound.tag or f"inbound {inbound.inbound_id}"
+    parts = [name]
     proto = (inbound.protocol or "").strip()
-    if proto and inbound.port:
-        return f"{name} · {proto}:{inbound.port}"
-    return name
+    if proto:
+        parts.append(proto)
+    if inbound.port:
+        parts.append(f"port {inbound.port}")
+    return " | ".join(parts)
 
 
 def _cancel_row(_: Callable[..., str]) -> list[InlineKeyboardButton]:
@@ -318,17 +321,41 @@ async def _prompt_server(reply: Message, state: FSMContext, _: Callable[..., str
                        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
+async def _bind_inbound_and_ask_ip(
+    reply: Message, state: FSMContext, inbound: XuiInbound,
+    _: Callable[..., str], *, auto: bool = False,
+) -> None:
+    """Store the chosen inbound and move on to the (optional) device limit.
+
+    ``auto=True`` is the single-inbound shortcut: the admin never had to pick,
+    so we tell them which inbound was auto-selected before asking for extras.
+    """
+    await state.update_data(xui_inbound_id=inbound.id, inbound_remark=_inbound_label(inbound))
+    await state.set_state(ProductAddForm.entering_ip_limit)
+    if auto:
+        await reply.answer(_("products.v2ray.auto_inbound", inbound=_inbound_label(inbound)))
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=_("products.v2ray.skip_btn"), callback_data=CB_ADD_SKIP_IP)]])
+    await reply.answer(_("products.v2ray.ask_ip_limit"), reply_markup=kb)
+
+
 async def _prompt_inbound(reply: Message, state: FSMContext, server_id: int,
                           _: Callable[..., str]) -> None:
-    """Show active synced inbounds for a server, or a clear error + guidance."""
+    """Bind the server's synced inbounds to the product.
+
+    * zero active inbounds → a clear error + a real «sync from panel» button;
+    * exactly one → auto-select it (admins never type inbound IDs);
+    * several → a picker of the active synced inbounds.
+    """
     async with SessionLocal() as session:
         server = await xui_server_service.get_server(session, server_id)
         if server is None:
             await state.clear()
             await reply.answer(_("products.unknown"))
             return
-        inbounds = await xui_server_service.list_inbounds(session, server_id, active_only=True)
+        inbounds = await xui_inbound_sync_service.list_active_synced_inbounds(session, server_id)
         server_name = server.name
+    await state.update_data(xui_server_id=server_id, server_name=server_name)
     if not inbounds:
         rows = [
             [InlineKeyboardButton(text=_("products.v2ray.sync_btn"),
@@ -340,13 +367,15 @@ async def _prompt_inbound(reply: Message, state: FSMContext, server_id: int,
         await reply.answer(_("products.v2ray.no_inbound"), parse_mode="HTML",
                            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         return
+    if len(inbounds) == 1:
+        await _bind_inbound_and_ask_ip(reply, state, inbounds[0], _, auto=True)
+        return
     rows = [[InlineKeyboardButton(text=_inbound_label(i), callback_data=f"{CB_ADD_INB}{i.id}")]
             for i in inbounds]
     rows.append([InlineKeyboardButton(text=_("products.v2ray.other_server_btn"),
                                       callback_data=CB_ADD_SRVLIST)])
     rows.append(_cancel_row(_))
     await state.set_state(ProductAddForm.choosing_inbound)
-    await state.update_data(xui_server_id=server_id, server_name=server_name)
     await reply.answer(_("products.v2ray.pick_inbound", server=server_name),
                        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
@@ -383,16 +412,39 @@ async def on_add_server_chosen(
 
 @router.callback_query(F.data.startswith(CB_ADD_SYNC))
 async def on_add_sync_hint(
-    callback: CallbackQuery, _: Callable[..., str], role: Role | None = None
+    callback: CallbackQuery, state: FSMContext, _: Callable[..., str],
+    lang: str = "fa", role: Role | None = None,
 ) -> None:
-    # Syncing from inside the bot is intentionally not offered (risky); guide the
-    # admin to the web panel instead.
+    # The admin never types an inbound id: tapping «sync» pulls every inbound
+    # from the panel and then re-shows the picker (auto-selecting a lone one).
     if not has_permission(role, "manage_products"):
         await callback.answer(_("products.not_authorized"), show_alert=True)
         return
-    await callback.answer()
-    if callback.message is not None:
-        await callback.message.answer(_("products.v2ray.sync_hint"), parse_mode="HTML")
+    raw = (callback.data or "")[len(CB_ADD_SYNC):]
+    if not raw.isdigit():
+        await callback.answer(_("products.unknown"), show_alert=True)
+        return
+    server_id = int(raw)
+    await callback.answer(_("products.v2ray.syncing"))
+    async with SessionLocal() as session:
+        result = await xui_inbound_sync_service.sync_server_inbounds(session, server_id)
+    if callback.message is None:
+        return
+    if not result.success:
+        rows = [
+            [InlineKeyboardButton(text=_("products.v2ray.sync_btn"),
+                                  callback_data=f"{CB_ADD_SYNC}{server_id}")],
+            [InlineKeyboardButton(text=_("products.v2ray.other_server_btn"),
+                                  callback_data=CB_ADD_SRVLIST)],
+            _cancel_row(_),
+        ]
+        await callback.message.answer(
+            _("products.v2ray.sync_failed", message=result.error_message or ""),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        return
+    await callback.message.answer(
+        _("products.v2ray.sync_done", count=result.total_remote_count))
+    await _prompt_inbound(callback.message, state, server_id, _)
 
 
 @router.callback_query(F.data.startswith(CB_ADD_INB))
@@ -412,13 +464,9 @@ async def on_add_inbound_chosen(
     if inbound is None:
         await callback.answer(_("products.unknown"), show_alert=True)
         return
-    await state.update_data(xui_inbound_id=inbound.id, inbound_remark=_inbound_label(inbound))
-    await state.set_state(ProductAddForm.entering_ip_limit)
     await callback.answer()
     if callback.message is not None:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=_("products.v2ray.skip_btn"), callback_data=CB_ADD_SKIP_IP)]])
-        await callback.message.answer(_("products.v2ray.ask_ip_limit"), reply_markup=kb)
+        await _bind_inbound_and_ask_ip(callback.message, state, inbound, _)
 
 
 @router.message(ProductAddForm.entering_ip_limit, F.text)

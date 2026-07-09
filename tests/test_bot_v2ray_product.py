@@ -96,18 +96,21 @@ async def db(monkeypatch):
         await engine.dispose()
 
 
-async def _seed_server(maker, *, active=True, with_inbound=True, inbound_active=True):
+async def _seed_server(maker, *, active=True, with_inbound=True, inbound_active=True,
+                       n_inbounds=1):
     async with maker() as s:
         srv = XuiServer(name="Germany", base_url="http://x", is_active=active, status="active")
         s.add(srv)
         await s.commit()
         inb_id = None
-        if with_inbound:
-            inb = XuiInbound(server_id=srv.id, inbound_id=7, remark="VLESS-Reality",
-                             protocol="vless", port=443, is_active=inbound_active)
+        for i in range(n_inbounds if with_inbound else 0):
+            remark = "VLESS-Reality" if n_inbounds == 1 else f"VLESS-Reality-{i}"
+            inb = XuiInbound(server_id=srv.id, inbound_id=7 + i, remark=remark,
+                             protocol="vless", port=443 + i, is_active=inbound_active)
             s.add(inb)
             await s.commit()
-            inb_id = inb.id
+            if inb_id is None:
+                inb_id = inb.id
         return srv.id, inb_id
 
 
@@ -139,7 +142,9 @@ async def test_v2ray_asks_for_server_after_traffic(db) -> None:
 
 
 async def test_v2ray_server_choice_shows_inbounds(db) -> None:
-    srv_id, _inb = await _seed_server(db)
+    # With MORE THAN ONE active inbound the admin gets a picker (auto-select only
+    # kicks in when there is exactly one).
+    srv_id, _inb = await _seed_server(db, n_inbounds=2)
     state = FState()
     await _walk_to_traffic(db, state)
     msg = FM(FU())
@@ -150,18 +155,29 @@ async def test_v2ray_server_choice_shows_inbounds(db) -> None:
     assert any(cb_.startswith(products_mod.CB_ADD_INB) for cb_ in _cb_datas(msg.markups[-1]))
 
 
+async def test_single_inbound_is_auto_selected(db) -> None:
+    # Exactly one active inbound → the admin never types/picks an id; it is bound
+    # automatically and the flow jumps straight to the device-limit step.
+    srv_id, inb_id = await _seed_server(db)  # one inbound
+    state = FState()
+    await _walk_to_traffic(db, state)
+    msg = FM(FU())
+    await products_mod.on_add_server_chosen(
+        FC(f"{products_mod.CB_ADD_SRV}{srv_id}", FU(), msg), state, FA, lang="fa", role=Role.OWNER)
+    assert state.state == ProductAddForm.entering_ip_limit
+    # The confirmation naming the auto-selected inbound was shown.
+    assert any("VLESS-Reality" in a for a in msg.answers)
+    data = await state.get_data()
+    assert data["xui_inbound_id"] == inb_id
+
+
 async def test_v2ray_full_flow_creates_bound_product(db) -> None:
     srv_id, inb_id = await _seed_server(db)
     state = FState()
     await _walk_to_traffic(db, state)
-    # choose server
+    # choose server → the sole inbound is auto-selected → asks device limit
     await products_mod.on_add_server_chosen(
         FC(f"{products_mod.CB_ADD_SRV}{srv_id}", FU(), FM(FU())), state, FA,
-        lang="fa", role=Role.OWNER)
-    # choose inbound → asks device limit
-    inb_msg = FM(FU())
-    await products_mod.on_add_inbound_chosen(
-        FC(f"{products_mod.CB_ADD_INB}{inb_id}", FU(), inb_msg), state, FA,
         lang="fa", role=Role.OWNER)
     assert state.state == ProductAddForm.entering_ip_limit
     # skip device limit → asks description
@@ -191,16 +207,34 @@ async def test_v2ray_device_limit_is_saved(db) -> None:
     srv_id, inb_id = await _seed_server(db)
     state = FState()
     await _walk_to_traffic(db, state)
+    # server choice auto-selects the sole inbound → straight to device-limit step
     await products_mod.on_add_server_chosen(
         FC(f"{products_mod.CB_ADD_SRV}{srv_id}", FU(), FM(FU())), state, FA, lang="fa", role=Role.OWNER)
-    await products_mod.on_add_inbound_chosen(
-        FC(f"{products_mod.CB_ADD_INB}{inb_id}", FU(), FM(FU())), state, FA, lang="fa", role=Role.OWNER)
     # enter a device limit of 3, then skip description
     await products_mod.on_ip_limit(FM(FU(), text="3"), state, FA, role=Role.OWNER)
     await products_mod.on_skip_desc(FC(products_mod.CB_ADD_SKIP_DESC, FU(), FM(FU())), state, FA, role=Role.OWNER)
     async with db() as s:
         p = (await product_service.list_for_admin(s))[0]
     assert p.ip_limit == 3
+    assert p.xui_inbound_id == inb_id
+
+
+async def test_v2ray_multi_inbound_pick_then_create(db) -> None:
+    # The multi-inbound path still lets the admin pick which inbound to bind.
+    srv_id, inb_id = await _seed_server(db, n_inbounds=2)
+    state = FState()
+    await _walk_to_traffic(db, state)
+    await products_mod.on_add_server_chosen(
+        FC(f"{products_mod.CB_ADD_SRV}{srv_id}", FU(), FM(FU())), state, FA, lang="fa", role=Role.OWNER)
+    assert state.state == ProductAddForm.choosing_inbound
+    await products_mod.on_add_inbound_chosen(
+        FC(f"{products_mod.CB_ADD_INB}{inb_id}", FU(), FM(FU())), state, FA, lang="fa", role=Role.OWNER)
+    assert state.state == ProductAddForm.entering_ip_limit
+    await products_mod.on_skip_ip(FC(products_mod.CB_ADD_SKIP_IP, FU(), FM(FU())), state, FA, role=Role.OWNER)
+    await products_mod.on_skip_desc(FC(products_mod.CB_ADD_SKIP_DESC, FU(), FM(FU())), state, FA, role=Role.OWNER)
+    async with db() as s:
+        p = (await product_service.list_for_admin(s))[0]
+    assert p.xui_inbound_id == inb_id
 
 
 # ==========================================================================
@@ -228,12 +262,54 @@ async def test_no_active_inbound_shows_clear_error(db) -> None:
     assert products_mod.CB_ADD_SRVLIST in datas
 
 
-async def test_sync_hint_is_guidance_only(db) -> None:
-    srv_id, _inb = await _seed_server(db, inbound_active=False)
+async def test_sync_button_pulls_inbounds_then_auto_selects(db, monkeypatch) -> None:
+    # Tapping «sync inbounds» from the product flow runs a REAL sync, then the
+    # freshly-synced (sole) inbound is auto-selected — no manual id typing.
+    from app.services import xui_inbound_sync_service as sync_mod
+
+    srv_id, _inb = await _seed_server(db, with_inbound=False)  # nothing synced yet
+    state = FState()
+    await _walk_to_traffic(db, state)
     msg = FM(FU())
-    cb = FC(f"{products_mod.CB_ADD_SYNC}{srv_id}", FU(), msg)
-    await products_mod.on_add_sync_hint(cb, FA, role=Role.OWNER)
-    assert msg.answers[-1] == FA("products.v2ray.sync_hint")
+    await products_mod.on_add_server_chosen(
+        FC(f"{products_mod.CB_ADD_SRV}{srv_id}", FU(), msg), state, FA, lang="fa", role=Role.OWNER)
+    assert msg.answers[-1] == FA("products.v2ray.no_inbound")
+
+    async def fake_sync(session, server_id, **kw):
+        session.add(XuiInbound(server_id=server_id, inbound_id=9, remark="Synced-VLESS",
+                               protocol="vless", port=2087, is_active=True))
+        await session.commit()
+        return sync_mod.SyncResult(server_id=server_id, server_name="Germany",
+                                   success=True, created_count=1, total_remote_count=1)
+
+    monkeypatch.setattr(products_mod.xui_inbound_sync_service, "sync_server_inbounds", fake_sync)
+    sync_msg = FM(FU())
+    await products_mod.on_add_sync_hint(
+        FC(f"{products_mod.CB_ADD_SYNC}{srv_id}", FU(), sync_msg), state, FA,
+        lang="fa", role=Role.OWNER)
+    assert any(a == FA("products.v2ray.sync_done", count=1) for a in sync_msg.answers)
+    assert state.state == ProductAddForm.entering_ip_limit  # sole inbound auto-selected
+
+
+async def test_sync_button_failure_reoffers_buttons(db, monkeypatch) -> None:
+    from app.services import xui_inbound_sync_service as sync_mod
+
+    srv_id, _inb = await _seed_server(db, with_inbound=False)
+    state = FState()
+    await _walk_to_traffic(db, state)
+
+    async def fake_sync(session, server_id, **kw):
+        return sync_mod.SyncResult(server_id=server_id, server_name="Germany",
+                                   success=False, error_message="unreachable")
+
+    monkeypatch.setattr(products_mod.xui_inbound_sync_service, "sync_server_inbounds", fake_sync)
+    sync_msg = FM(FU())
+    await products_mod.on_add_sync_hint(
+        FC(f"{products_mod.CB_ADD_SYNC}{srv_id}", FU(), sync_msg), state, FA,
+        lang="fa", role=Role.OWNER)
+    assert sync_msg.answers[-1] == FA("products.v2ray.sync_failed", message="unreachable")
+    datas = _cb_datas(sync_msg.markups[-1])
+    assert any(d.startswith(products_mod.CB_ADD_SYNC) for d in datas)
 
 
 # ==========================================================================

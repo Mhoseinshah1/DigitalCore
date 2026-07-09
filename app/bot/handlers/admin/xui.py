@@ -21,8 +21,7 @@ from app.core.permissions import Role, has_permission
 from app.database import SessionLocal
 from app.i18n import t, texts_for
 from app.models.xui_server import XuiServer
-from app.services import xui_service
-from app.xui.exceptions import XuiError
+from app.services import xui_inbound_sync_service, xui_service
 from app.xui.registry import SUPPORTED_VERSIONS
 
 log = logging.getLogger("bot.xui")
@@ -34,6 +33,7 @@ CB_ADD = "srv:add"
 CB_VERSION = "srvver:"
 CB_TEST = "srv:test:"
 CB_SYNC = "srv:sync:"
+CB_SYNC_ALL = "srv:syncall"
 
 
 def _status_text(status: str, lang: str) -> str:
@@ -41,6 +41,9 @@ def _status_text(status: str, lang: str) -> str:
         "online": "xui.status.online",
         "offline": "xui.status.offline",
         "auth_error": "xui.status.auth_error",
+        "active": "xui.status.active",
+        "error": "xui.status.error",
+        "inactive": "xui.status.inactive",
     }.get(status, "xui.status.unknown")
     return t(key, lang)
 
@@ -74,6 +77,10 @@ async def _admin_overview(lang: str) -> tuple[str, InlineKeyboardMarkup]:
                     text=t("btn.srv.sync", lang), callback_data=f"{CB_SYNC}{s.id}"
                 ),
             ]
+        )
+    if servers:
+        buttons.append(
+            [InlineKeyboardButton(text=t("xui.sync.all_btn", lang), callback_data=CB_SYNC_ALL)]
         )
     buttons.append(
         [InlineKeyboardButton(text=t("servers.admin.add", lang), callback_data=CB_ADD)]
@@ -267,6 +274,22 @@ async def on_test(
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
+@router.callback_query(F.data == CB_SYNC_ALL)
+async def on_sync_all(
+    callback: CallbackQuery, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    if not has_permission(role, "manage_xui"):
+        await callback.answer(_("xui.not_authorized"), show_alert=True)
+        return
+    await callback.answer()
+    async with SessionLocal() as session:
+        results = await xui_inbound_sync_service.sync_all_active_servers(session)
+    if isinstance(callback.message, Message):
+        await callback.message.answer(_sync_report(results, lang), parse_mode="HTML")
+        text, keyboard = await _admin_overview(lang)
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
 @router.callback_query(F.data.startswith(CB_SYNC))
 async def on_sync(
     callback: CallbackQuery, _: Callable[..., str], lang: str = "fa", role: Role | None = None
@@ -276,18 +299,52 @@ async def on_sync(
         return
     server_id = int((callback.data or "0")[len(CB_SYNC):])
     async with SessionLocal() as session:
-        server = await xui_service.get_server(session, server_id)
-        if server is None:
-            await callback.answer(_("servers.unknown"), show_alert=True)
-            return
-        try:
-            count = await xui_service.sync_inbounds(session, server)
-        except XuiError as exc:
-            await callback.answer(
-                t("xui.test.fail", lang, message=str(exc)), show_alert=True
-            )
-            return
-    await callback.answer(t("xui.sync.ok", lang, count=count), show_alert=True)
+        result = await xui_inbound_sync_service.sync_server_inbounds(session, server_id)
+    if not result.success:
+        await callback.answer(
+            t("xui.test.fail", lang, message=result.error_message or ""), show_alert=True
+        )
+        return
+    await callback.answer(
+        t("xui.sync.detail", lang, total=result.total_remote_count,
+          created=result.created_count, updated=result.updated_count,
+          disabled=result.disabled_count),
+        show_alert=True,
+    )
     text, keyboard = await _admin_overview(lang)
     if isinstance(callback.message, Message):
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+def _sync_report(results: list, lang: str) -> str:
+    """A safe, per-server diagnostic of a sync-all run (no secrets)."""
+    from app.bot.utils.message_format import esc
+
+    lines = [t("xui.sync.report_title", lang)]
+    if not results:
+        lines.append(t("xui.sync.no_servers", lang))
+        return "\n".join(lines)
+    for r in results:
+        if r.success:
+            lines.append(t(
+                "xui.sync.report_ok", lang, name=esc(r.server_name),
+                total=r.total_remote_count, created=r.created_count,
+                updated=r.updated_count, disabled=r.disabled_count))
+        else:
+            lines.append(t(
+                "xui.sync.report_fail", lang, name=esc(r.server_name),
+                message=esc(r.error_message or "")))
+    return "\n".join(lines)
+
+
+@router.message(Command("xui_sync"))
+async def on_xui_sync_command(
+    message: Message, _: Callable[..., str], lang: str = "fa", role: Role | None = None
+) -> None:
+    """Diagnostic: sync every active 3X-UI server and report the outcome."""
+    if not has_permission(role, "manage_xui"):
+        await message.answer(_("xui.not_authorized"))
+        return
+    async with SessionLocal() as session:
+        results = await xui_inbound_sync_service.sync_all_active_servers(session)
+    await message.answer(_sync_report(results, lang), parse_mode="HTML")

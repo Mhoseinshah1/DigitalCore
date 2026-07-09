@@ -321,25 +321,31 @@ async def test_connection(
 async def sync_inbounds(
     session: AsyncSession, server_id: int, *, actor_id: int | None = None, transport=None
 ) -> dict[str, object]:
-    """Pull inbounds from the panel into XuiInbound rows (idempotent upsert)."""
-    from app.services import xui_service
-    from app.xui.exceptions import XuiError
+    """Auto-discover + upsert the panel's inbounds (idempotent). Never raises.
+
+    Delegates to xui_inbound_sync_service (the single sync implementation) and
+    returns a secret-free dict for the admin UI, including created / updated /
+    disabled / total counts.
+    """
+    from app.services import xui_inbound_sync_service
 
     server = await get_server(session, server_id)
     if server is None:
         return {"ok": False, "count": 0, "message": "server not found"}
-    try:
-        count = await xui_service.sync_inbounds(session, server, transport=transport)
-        server.status = "active"
-        server.last_error = None
-    except XuiError as exc:
-        server.status = "error"
-        server.last_error = str(exc)
-        await session.commit()
-        return {"ok": False, "count": 0, "message": str(exc)}
+    r = await xui_inbound_sync_service.sync_server_inbounds(
+        session, server_id, transport=transport)
+    if not r.success:
+        return {"ok": False, "count": 0, "message": r.error_message or "sync failed"}
     await audit_service.log(
         session, actor_type="admin", actor_id=actor_id,
         action="xui_inbounds_synced", target_type="xui_server", target_id=server.id,
-        new=f"count={count}",
+        new=f"total={r.total_remote_count} created={r.created_count} "
+            f"updated={r.updated_count} disabled={r.disabled_count}",
     )
-    return {"ok": True, "count": count, "message": f"synced {count} inbound(s)"}
+    await session.commit()
+    return {
+        "ok": True, "count": r.total_remote_count, "created": r.created_count,
+        "updated": r.updated_count, "disabled": r.disabled_count,
+        "total": r.total_remote_count,
+        "message": f"synced {r.total_remote_count} inbound(s)",
+    }
