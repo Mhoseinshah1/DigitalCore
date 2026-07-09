@@ -243,6 +243,14 @@ HEALTH_URL="http://localhost:${API_PORT}/health"
 READY_URL="http://localhost:${API_PORT}/ready"
 
 # --- 5. build & start --------------------------------------------------------
+# Ensure the runtime storage tree exists on the host before the bind-mount is
+# created. The container entrypoint chowns it to the app user at startup; making
+# the dirs here means a fresh clone never mounts a missing path. Receipt uploads
+# write under storage/receipts/…, so that subtree matters most.
+info "Preparing the storage directory…"
+mkdir -p storage/receipts storage/receipts/wallet \
+         storage/exports storage/logs storage/backups storage/temp
+
 info "Building and starting the stack (this can take a few minutes)…"
 $COMPOSE up -d --build
 

@@ -669,6 +669,80 @@ CATALOG: dict[str, str] = {
     "blocked.active": "⛔️ Your access to this bot has been restricted.",
     "products.user.buy_soon": "🛒 Buying will be enabled in the next phase.",
     "admin.stats.title": "📊 <b>Overview</b>",
+    # === Telegram admin "📊 Bot stats" section ===
+    "btn.admin.stats": "📊 Bot stats",
+    "btn.admin.pending": "🧾 Pending receipts",
+    "admin.stats.denied": "You don't have permission to view statistics.",
+    "admin.stats.body": (
+        "📊 Overall bot statistics\n"
+        "🗓 Range: {range_title}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👥 Total users: {total_users}\n"
+        "💳 Users with a purchase: {users_with_purchase}\n"
+        "🧪 Test accounts: {total_test_accounts}\n"
+        "💰 Total users' balance: {total_users_balance} T\n\n"
+        "🧾 Total sales: {total_sales_count}\n"
+        "🧾 Active-service sales: {active_services_sales_count}\n"
+        "💵 Total sales amount: {total_sales_amount} T\n"
+        "💵 Active-service sales amount: {active_services_sales_amount} T\n"
+        "🔄 Total renewals: {total_renew_amount} T\n"
+        "🏷 Total discount given: {total_discount_amount} T\n"
+        "🏷 Coupon uses: {discount_usage_count}\n"
+        "📈 Conversion rate: {conversion_rate}%\n"
+        "💳 Average purchase per customer: {average_purchase_per_customer} T\n"
+        "📅 Predicted monthly income: {predicted_monthly_income} T\n"
+        "📊 Renewals as % of sales: {renew_percent_from_sales}%\n\n"
+        "👨‍💼 Total resellers: {total_resellers}\n"
+        "🔹 Type-N resellers: {n_resellers_count}\n"
+        "🔸 Type-N2 resellers: {n2_resellers_count}\n"
+        "🧩 Panels: {total_panels}"
+    ),
+    "admin.stats.gateway_row": (
+        "\n📌 Gateway: {name}\n"
+        " - Successful payments: {count}\n"
+        " - Total paid: {amount}"
+    ),
+    "admin.stats.no_gateways": "There is no active gateway to show stats for.",
+    "admin.stats.range.all": "Overall",
+    "admin.stats.range.last_hour": "Last hour",
+    "admin.stats.range.today": "Today",
+    "admin.stats.range.yesterday": "Yesterday",
+    "admin.stats.range.current_month": "This month",
+    "admin.stats.range.previous_month": "Last month",
+    "admin.stats.range.custom": "{start} to {end}",
+    "admin.stats.btn.all": "Overall",
+    "admin.stats.btn.last_hour": "Last hour",
+    "admin.stats.btn.today": "Today",
+    "admin.stats.btn.yesterday": "Yesterday",
+    "admin.stats.btn.current_month": "This month",
+    "admin.stats.btn.previous_month": "Last month",
+    "admin.stats.btn.custom": "Stats for a specific date range",
+    "admin.stats.btn.products": "Compare product sales",
+    "admin.stats.btn.back": "Back to admin menu",
+    "admin.stats.ask_start": (
+        "To view statistics for a different date range, first send the start date.\n\n"
+        "Example:\n1404/01/01"
+    ),
+    "admin.stats.ask_end": "Now send the end date.\n\nExample:\n1404/01/30",
+    "admin.stats.bad_date": "Invalid date. Please enter it like 1404/01/01.",
+    "admin.stats.end_before_start": "The end date can't be before the start date. Send the start date again.",
+    "admin.stats.back_to_menu": "Admin panel",
+    "admin.stats.products.menu": "🗂 Compare product sales — pick a range:",
+    "admin.stats.products.title": (
+        "📊 Product sales comparison\n━━━━━━━━━━━━━━━━━━\nRange: {range_title}"
+    ),
+    "admin.stats.products.row": (
+        "\n🛍 Product: {name}\n🧾 Sales count: {count}\n💵 Sales amount: {amount} T"
+    ),
+    "admin.stats.products.empty": "No product sales were recorded in this range.",
+    "admin.stats.products.range.7d": "Last 7 days",
+    "admin.stats.products.range.30d": "Last 30 days",
+    "admin.stats.products.range.current_month": "This month",
+    "admin.stats.products.btn.7d": "Last 7 days",
+    "admin.stats.products.btn.30d": "Last 30 days",
+    "admin.stats.products.btn.current_month": "This month",
+    "admin.stats.products.btn.custom": "Custom range",
+    "admin.stats.products.btn.back": "Back to stats",
     "admin.stats.users": "👥 Users: {n}",
     "admin.stats.blocked": "🚫 Blocked: {n}",
     "admin.stats.products": "📦 Active products: {n}",
@@ -747,7 +821,7 @@ CATALOG: dict[str, str] = {
     "purchase.receipt.too_large": "The file is too large (max 10 MB).",
     "purchase.receipt.empty": "The file is empty.",
     "purchase.receipt.already_submitted": "A receipt was already submitted for this order.",
-    "purchase.download_failed": "Downloading the file from Telegram failed. Please try again.",
+    "purchase.download_failed": "Downloading the receipt file failed. Please send it again.",
     "orders.user.title": "🧾 <b>Your orders</b>",
     "orders.user.empty": "You have no orders yet.",
     "orders.row.number": "🧾 Order <code>{number}</code>",
@@ -907,6 +981,23 @@ CATALOG: dict[str, str] = {
     "radm.block_confirm": "Are you sure you want to block this user?",
     "radm.block_ok": "🚫 User blocked.",
     "radm.restrict_ok": "⚠️ User restricted.",
+    # Enriched receipt notification + details/delete actions.
+    "notify.receipt.tracking": "Tracking code: {code}",
+    "notify.receipt.name": "Name: {name}",
+    "notify.receipt.method": "Payment method: {method}",
+    "notify.receipt.wallet": "Wallet balance: {amount} T",
+    "notify.receipt.btn.details": "📝 Details",
+    "notify.receipt.btn.delete": "🗑 Delete receipt",
+    "radm.details.title": "📝 <b>Payment details</b>",
+    "radm.details.order": "Order: {number} ({status})",
+    "radm.details.product": "Product: {title}",
+    "radm.details.amount": "Amount: {amount} T",
+    "radm.details.method": "Payment method: {method}",
+    "radm.details.tracking": "Tracking code: {code}",
+    "radm.details.user": "User: {name} ({username}) — {tg_id}",
+    "radm.details.wallet": "Wallet balance: {amount} T",
+    "radm.details.time": "Receipt submitted: {time}",
+    "radm.receipt_deleted": "🗑 Receipt deleted. The user can send a new one.",
     "radm.viewuser.title": "👤 <b>User info</b>",
     "radm.viewuser.user": "User: {username} (<code>{tg_id}</code>)",
     "radm.viewuser.wallet": "Balance: {amount} Toman",

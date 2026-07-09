@@ -44,6 +44,11 @@ FINANCIAL_TEXTS = (
     | texts_for("btn.admin.broadcast")
     | {"اطلاعات مالی", "اطلاعات ثانی", "گزارش مالی", "مالی", "💰 اطلاعات مالی", "Financial"}
 )
+# Pending receipts stay a SEPARATE section from stats (owner's explicit request).
+PENDING_TEXTS = (
+    texts_for("btn.admin.pending")
+    | {"رسیدهای تایید نشده", "🧾 رسیدهای تایید نشده", "رسیدهای در انتظار", "Pending receipts"}
+)
 
 CB_ADMIN_PENDING = "adm:pending"  # inline quick-jump to pending receipts
 
@@ -460,6 +465,19 @@ async def on_admin_pending_cb(
     await callback.answer()
     if callback.message is not None:
         await callback.message.answer(await _render_pending_receipts(_), parse_mode="HTML")
+
+
+@router.message(StateFilter(None), F.text.in_(PENDING_TEXTS))
+async def on_admin_pending_button(
+    message: Message, _: "Callable[..., str]", lang: str = "fa", role: Role | None = None
+) -> None:
+    """«🧾 رسیدهای تایید نشده» — its own admin section, kept separate from stats."""
+    if role is None:  # ordinary user typed a matching word → let it fall through
+        return
+    if not has_permission(role, "view_payments"):
+        await message.answer(_("admin.not_authorized"))
+        return
+    await message.answer(await _render_pending_receipts(_), parse_mode="HTML")
 
 
 @router.message(Command("admin_debug"))

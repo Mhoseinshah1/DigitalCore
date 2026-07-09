@@ -46,6 +46,8 @@ CB = "radm:"  # radm:<action>:<order_id>
 _ACTION_PERM: dict[str, str | None] = {
     "approve": "process_payments",
     "reject": "process_payments",
+    "details": "view_payments",
+    "delrcpt": "process_payments",
     "addbal": "adjust_wallet",
     "subbal": "adjust_wallet",
     "block": "block_users",
@@ -67,6 +69,7 @@ def receipt_action_keyboard(order_id: int, _: Callable[..., str]) -> InlineKeybo
         return InlineKeyboardButton(text=_(key), callback_data=f"{CB}{action}:{order_id}")
     return InlineKeyboardMarkup(inline_keyboard=[
         [b("approve", "notify.receipt.btn.approve"), b("reject", "notify.receipt.btn.reject")],
+        [b("details", "notify.receipt.btn.details"), b("delrcpt", "notify.receipt.btn.delete")],
         [b("addbal", "notify.receipt.btn.addbal"), b("subbal", "notify.receipt.btn.subbal")],
         [b("block", "notify.receipt.btn.block"), b("restrict", "notify.receipt.btn.restrict")],
         [b("viewuser", "notify.receipt.btn.viewuser"), b("panel", "notify.receipt.btn.panel")],
@@ -159,6 +162,49 @@ async def on_receipt_action(
                 _("radm.viewuser.order", number=number, status=order_status_label(order.status, lang)),
             ]
             await _answer(callback, "\n".join(lines))
+            return
+
+        if action == "details":
+            payment = await payment_service.get_payment_by_order(session, order_id)
+            product = order.product
+            method_key = f"order.method.{order.payment_method}"
+            method = _(method_key)
+            if method == method_key:
+                method = _("order.method.unknown")
+            full_name = " ".join(filter(None, [
+                (user.first_name if user else None), (user.last_name if user else None)])) or "—"
+            tracking = (payment.tracking_code if payment else None) or "—"
+            submitted = (payment.submitted_at.strftime("%Y-%m-%d %H:%M")
+                         if payment and payment.submitted_at else "—")
+            lines = [
+                _("radm.details.title"),
+                _("radm.details.order", number=number, status=order_status_label(order.status, lang)),
+                _("radm.details.product", title=(product.title if product else "—")),
+                _("radm.details.amount", amount=f"{order.final_amount:,}"),
+                _("radm.details.method", method=method),
+                _("radm.details.tracking", code=tracking),
+                _("radm.details.user",
+                  name=full_name,
+                  username=("@" + user.username) if user and user.username else "—",
+                  tg_id=(user.telegram_id if user else "—")),
+                _("radm.details.wallet", amount=f"{(user.wallet_balance if user else 0):,}"),
+                _("radm.details.time", time=submitted),
+            ]
+            await _answer(callback, "\n".join(lines))
+            return
+
+        if action == "delrcpt":
+            try:
+                await payment_service.delete_receipt(session, order_id)
+                await session.commit()
+            except payment_service.ReceiptError:
+                await callback.answer(_("radm.not_reviewable"), show_alert=True)
+                return
+            await audit_service.log(
+                session, actor_type="admin", actor_id=admin_tg, action="receipt_deleted",
+                target_type="order", target_id=order_id)
+            await session.commit()
+            await _answer(callback, _("radm.receipt_deleted"))
             return
 
         if action == "blockok":

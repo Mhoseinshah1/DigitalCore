@@ -475,11 +475,14 @@ def test_no_admin_menu_button_is_dead() -> None:
     # Every label the admin reply-keyboard can show must map to a handler set.
     from app.bot.handlers.admin import products as p_mod
     from app.bot.handlers.admin import settings as set_mod
+    from app.bot.handlers.admin import stats as stats_mod
     from app.bot.handlers.admin import xui as x_mod
     from app.bot.handlers.admin.menu import USER_MENU_TEXTS
     from app.i18n import texts_for
 
     handled: set[str] = set()
+    handled |= stats_mod.STATS_TEXTS          # 📊 آمار ربات
+    handled |= panel_mod.PENDING_TEXTS        # 🧾 رسیدهای تایید نشده
     handled |= panel_mod.DASHBOARD_TEXTS
     handled |= panel_mod.USERS_TEXTS
     handled |= panel_mod.FINANCIAL_TEXTS
@@ -487,8 +490,8 @@ def test_no_admin_menu_button_is_dead() -> None:
     handled |= texts_for("btn.admin.servers")
     handled |= texts_for("btn.admin.settings")
     handled |= USER_MENU_TEXTS
-    # Guard the two handler modules are importable (routes exist).
-    assert p_mod.router and set_mod.router and x_mod.router
+    # Guard the handler modules are importable (routes exist).
+    assert p_mod.router and set_mod.router and x_mod.router and stats_mod.router
 
     for lang in ("fa", "en"):
         menu = admin_main_menu(lang)
