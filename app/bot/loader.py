@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from app.bot.handlers.admin import fallback as admin_fallback
 from app.bot.handlers.admin import menu as admin_menu
 from app.bot.handlers.admin import panel as admin_panel
+from app.bot.handlers.admin import stats as admin_stats
 from app.bot.handlers.admin import products as admin_products
 from app.bot.handlers.admin import receipt_actions as admin_receipt_actions
 from app.bot.handlers.admin import settings as admin_settings
@@ -51,6 +52,9 @@ def create_dispatcher() -> Dispatcher:
         observer.middleware(ForceJoinMiddleware())
 
     dp.include_router(admin_menu.router)
+    # Stats before panel: the "📊 آمار ربات" section owns the old dashboard labels
+    # ("داشبورد"/"📊 داشبورد"), so it must match before panel's overview handler.
+    dp.include_router(admin_stats.router)
     dp.include_router(admin_panel.router)
     dp.include_router(admin_settings.router)
     dp.include_router(admin_products.router)

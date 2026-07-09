@@ -277,13 +277,8 @@ async def submit_topup_receipt(
     when = _now()
     rel = _wallet_receipt_relpath(topup_id, file_info.original_name, file_info.mime_type, when)
     dest = payment_service.RECEIPTS_ROOT / rel
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(file_info.content)
-    except OSError as exc:  # unwritable storage (perms / missing mount) — surface it
-        log.error("top-up receipt storage write failed at %s: %s", dest, exc)
-        raise payment_service.ReceiptError(
-            "could not save the receipt file", code="storage") from exc
+    payment_service.save_receipt_bytes(dest, file_info.content,
+                                       file_id=file_info.file_id, mime_type=file_info.mime_type)
 
     topup.receipt_path = rel
     topup.receipt_file_id = file_info.file_id

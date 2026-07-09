@@ -12,6 +12,7 @@ the serving layer re-validates containment to defeat path traversal.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,8 +26,16 @@ from app.services import audit_service, order_service
 
 log = logging.getLogger("payment")
 
-# storage/receipts/ at the repo root. Overridable in tests via monkeypatch.
-RECEIPTS_ROOT: Path = Path(__file__).resolve().parents[2] / "storage" / "receipts"
+def _storage_root() -> Path:
+    """Runtime storage root. ``STORAGE_ROOT`` (set in Docker via .env) wins so ops
+    can relocate persisted files onto a writable volume; otherwise the repo's
+    ``storage/`` directory is used."""
+    env = os.environ.get("STORAGE_ROOT", "").strip()
+    return Path(env) if env else Path(__file__).resolve().parents[2] / "storage"
+
+
+# storage/receipts/ (repo root or $STORAGE_ROOT). Overridable in tests via monkeypatch.
+RECEIPTS_ROOT: Path = _storage_root() / "receipts"
 
 MAX_RECEIPT_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS: frozenset[str] = frozenset({"jpg", "jpeg", "png", "webp", "pdf"})
@@ -125,6 +134,65 @@ def build_receipt_relpath(
     return f"{when.year:04d}/{when.month:02d}/{safe_order}_{safe_name}"
 
 
+def _nearest_existing(path: Path) -> Path:
+    """The closest ancestor of `path` that exists (for a writability probe)."""
+    p = path
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    return p
+
+
+def _storage_diag(dest: Path) -> str:
+    """A safe one-line diagnostic — directory existence + writability, no secrets
+    and no file bytes — for logging when a receipt write fails."""
+    parent = dest.parent
+    try:
+        exists = parent.exists()
+        probe = parent if exists else _nearest_existing(parent)
+        writable = os.access(probe, os.W_OK)
+    except OSError:
+        exists, writable = False, False
+    return f"dir={parent} exists={exists} writable={writable}"
+
+
+def save_receipt_bytes(
+    dest: Path, content: bytes, *, file_id: str | None = None, mime_type: str | None = None
+) -> None:
+    """Atomically write receipt bytes to `dest`, creating parent dirs as needed.
+
+    Writes to a hidden temp file in the destination directory then ``os.replace``s
+    it into place, so a concurrent reader (the web panel serving the receipt)
+    never sees a half-written file. On any filesystem error raises
+    ``ReceiptError(code="storage")`` after logging a safe diagnostic (directory
+    existence + writability + exception class — never the bytes or any secret).
+
+    This is the single choke point every receipt flow (product, invoice, wallet
+    top-up) writes through, so the storage fix and logging live in one place.
+    """
+    log.info(
+        "saving receipt file_id=%s mime=%s size=%d -> %s",
+        file_id or "-", mime_type or "-", len(content), dest.name,
+    )
+    tmp = dest.with_name(f".{dest.name}.tmp-{os.getpid()}")
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tmp.write_bytes(content)
+            os.replace(tmp, dest)  # atomic within the same filesystem
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+    except OSError as exc:  # unwritable storage (perms / missing mount) — surface it
+        log.error(
+            "receipt storage write failed (%s): %s | %s",
+            type(exc).__name__, _storage_diag(dest), exc,
+        )
+        raise ReceiptError("could not save the receipt file", code="storage") from exc
+
+
 def resolve_receipt_path(stored_rel: str | None) -> Path | None:
     """Resolve a stored relative path to an absolute file, guarding traversal.
 
@@ -215,12 +283,8 @@ async def submit_receipt(
     when = _now()
     rel = build_receipt_relpath(order.order_number, file_info.original_name, file_info.mime_type, when)
     dest = RECEIPTS_ROOT / rel
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(file_info.content)
-    except OSError as exc:  # unwritable storage (perms / missing mount) — surface it
-        log.error("receipt storage write failed at %s: %s", dest, exc)
-        raise ReceiptError("could not save the receipt file", code="storage") from exc
+    save_receipt_bytes(dest, file_info.content,
+                       file_id=file_info.file_id, mime_type=file_info.mime_type)
 
     payment.receipt_path = rel
     payment.receipt_file_id = file_info.file_id
@@ -238,6 +302,40 @@ async def submit_receipt(
         meta=f"order={order.order_number} size={file_info.size} mime={payment.receipt_mime_type}",
     )
     await session.refresh(payment)
+    return payment
+
+
+async def delete_receipt(session: AsyncSession, order_id: int) -> Payment:
+    """Admin action: discard a submitted receipt so the user can resend one.
+
+    Deletes the stored file (best-effort), clears the receipt metadata, and
+    reverts the payment to ``pending`` / order to ``pending_payment`` so the
+    normal card-to-card flow can accept a fresh receipt. Only a receipt that is
+    still awaiting review can be deleted (a paid/approved one is refused).
+    """
+    order = await order_service.get_order(session, order_id)
+    payment = await get_payment_by_order(session, order_id)
+    _ensure_reviewable(order, payment)
+
+    stored = resolve_receipt_path(payment.receipt_path)
+    if stored is not None and stored.exists():
+        try:
+            stored.unlink()
+        except OSError as exc:  # a missing/locked file must not block the revert
+            log.warning("could not delete receipt file for order %s: %s", order_id, exc)
+
+    payment.receipt_path = None
+    payment.receipt_file_id = None
+    payment.receipt_mime_type = None
+    payment.receipt_original_name = None
+    payment.receipt_size = None
+    payment.submitted_at = None
+    payment.status = "pending"
+    order.status = "pending_payment"
+    await audit_service.log(
+        session, actor_type="admin", actor_id=None, action="receipt_deleted",
+        target_type="payment", target_id=payment.id, meta=f"order={order.order_number}",
+    )
     return payment
 
 

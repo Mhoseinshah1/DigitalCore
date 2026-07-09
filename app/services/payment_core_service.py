@@ -432,8 +432,8 @@ async def submit_manual_receipt(
     rel = payment_service.build_receipt_relpath(
         ref, file_info.original_name, file_info.mime_type, when)
     dest = payment_service.RECEIPTS_ROOT / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(file_info.content)
+    payment_service.save_receipt_bytes(dest, file_info.content,
+                                       file_id=file_info.file_id, mime_type=file_info.mime_type)
 
     payment.receipt_path = rel
     payment.receipt_file_id = file_info.file_id

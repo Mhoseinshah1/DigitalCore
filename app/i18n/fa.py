@@ -669,6 +669,80 @@ CATALOG: dict[str, str] = {
     "blocked.active": "⛔️ دسترسی شما به این ربات محدود شده است.",
     "products.user.buy_soon": "🛒 خرید در فاز بعدی فعال می‌شود.",
     "admin.stats.title": "📊 <b>نمای کلی</b>",
+    # === Telegram admin "📊 آمار ربات" section ===
+    "btn.admin.stats": "📊 آمار ربات",
+    "btn.admin.pending": "🧾 رسیدهای تایید نشده",
+    "admin.stats.denied": "شما دسترسی لازم برای مشاهده آمار را ندارید.",
+    "admin.stats.body": (
+        "📊 آمار کلی ربات\n"
+        "🗓 بازه: {range_title}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👥 تعداد کل کاربران: {total_users} نفر\n"
+        "💳 کاربران دارای خرید: {users_with_purchase} نفر\n"
+        "🧪 اکانت‌های تست: {total_test_accounts} نفر\n"
+        "💰 موجودی کل کاربران: {total_users_balance} تومان\n\n"
+        "🧾 تعداد کل فروش: {total_sales_count} عدد\n"
+        "🧾 تعداد کل فروش سرویس های فعال: {active_services_sales_count} عدد\n"
+        "💵 جمع کل فروش : {total_sales_amount} تومان\n"
+        "💵 جمع کل فروش سرویس های فعال: {active_services_sales_amount} تومان\n"
+        "🔄 جمع کل تمدید: {total_renew_amount} تومان\n"
+        "🏷 جمع کل تخفیف داده‌شده: {total_discount_amount} تومان\n"
+        "🏷 تعداد استفاده از کد تخفیف: {discount_usage_count} بار\n"
+        "📈 نرخ تبدیل به مشتری: {conversion_rate}٪\n"
+        "💳 میانگین خرید هر مشتری: {average_purchase_per_customer} تومان\n"
+        "📅 درآمد پیش‌بینی‌شده ماهانه: {predicted_monthly_income} تومان\n"
+        "📊 درصد تمدید از فروش: {renew_percent_from_sales}٪\n\n"
+        "👨‍💼 تعداد کل نمایندگان: {total_resellers} نفر\n"
+        "🔹 نمایندگان نوع N: {n_resellers_count} نفر\n"
+        "🔸 نمایندگان نوع N2: {n2_resellers_count} نفر\n"
+        "🧩 تعداد پنل‌ها: {total_panels} عدد"
+    ),
+    "admin.stats.gateway_row": (
+        "\n📌 نام درگاه : {name}\n"
+        " - تعداد پرداخت موفق : {count}\n"
+        " - جمع پرداختی ها : {amount}"
+    ),
+    "admin.stats.no_gateways": "درگاه فعالی برای نمایش آمار وجود ندارد.",
+    "admin.stats.range.all": "آمار کلی",
+    "admin.stats.range.last_hour": "یک ساعت اخیر",
+    "admin.stats.range.today": "امروز",
+    "admin.stats.range.yesterday": "دیروز",
+    "admin.stats.range.current_month": "ماه فعلی",
+    "admin.stats.range.previous_month": "ماه قبل",
+    "admin.stats.range.custom": "{start} تا {end}",
+    "admin.stats.btn.all": "آمار کلی",
+    "admin.stats.btn.last_hour": "یک ساعت اخیر",
+    "admin.stats.btn.today": "امروز",
+    "admin.stats.btn.yesterday": "دیروز",
+    "admin.stats.btn.current_month": "ماه فعلی",
+    "admin.stats.btn.previous_month": "ماه قبل",
+    "admin.stats.btn.custom": "مشاهده آمار در تاریخ مشخص",
+    "admin.stats.btn.products": "مقایسه فروش محصولات",
+    "admin.stats.btn.back": "بازگشت به منوی مدیریت",
+    "admin.stats.ask_start": (
+        "در صورتی که میخواهید آمار را در بازه تاریخی دیگری ببینید، ابتدا تاریخ شروع را ارسال کنید.\n\n"
+        "مثال:\n1404/01/01"
+    ),
+    "admin.stats.ask_end": "تاریخ پایان را ارسال کنید.\n\nمثال:\n1404/01/30",
+    "admin.stats.bad_date": "تاریخ نامعتبر است. لطفاً به‌صورت 1404/01/01 وارد کنید.",
+    "admin.stats.end_before_start": "تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد. دوباره تاریخ شروع را ارسال کنید.",
+    "admin.stats.back_to_menu": "پنل مدیریت",
+    "admin.stats.products.menu": "🗂 مقایسه فروش محصولات — یک بازه را انتخاب کنید:",
+    "admin.stats.products.title": (
+        "📊 مقایسه فروش محصولات\n━━━━━━━━━━━━━━━━━━\nبازه: {range_title}"
+    ),
+    "admin.stats.products.row": (
+        "\n🛍 نام محصول: {name}\n🧾 تعداد فروش: {count} عدد\n💵 جمع فروش: {amount} تومان"
+    ),
+    "admin.stats.products.empty": "در این بازه فروشی برای محصولات ثبت نشده است.",
+    "admin.stats.products.range.7d": "هفت روز اخیر",
+    "admin.stats.products.range.30d": "سی روز اخیر",
+    "admin.stats.products.range.current_month": "ماه جاری",
+    "admin.stats.products.btn.7d": "هفت روز اخیر",
+    "admin.stats.products.btn.30d": "سی روز اخیر",
+    "admin.stats.products.btn.current_month": "ماه جاری",
+    "admin.stats.products.btn.custom": "انتخاب بازه دلخواه",
+    "admin.stats.products.btn.back": "بازگشت به آمار",
     "admin.stats.users": "👥 کاربران: {n}",
     "admin.stats.blocked": "🚫 مسدود: {n}",
     "admin.stats.products": "📦 محصولات فعال: {n}",
@@ -747,7 +821,7 @@ CATALOG: dict[str, str] = {
     "purchase.receipt.too_large": "حجم فایل زیاد است (حداکثر ۱۰ مگابایت).",
     "purchase.receipt.empty": "فایل خالی است.",
     "purchase.receipt.already_submitted": "برای این سفارش قبلاً رسید ثبت شده است.",
-    "purchase.download_failed": "دریافت فایل از تلگرام ناموفق بود. دوباره تلاش کنید.",
+    "purchase.download_failed": "دریافت فایل رسید با خطا مواجه شد. لطفاً دوباره ارسال کنید.",
     "orders.user.title": "🧾 <b>سفارش‌های شما</b>",
     "orders.user.empty": "هنوز سفارشی ثبت نکرده‌اید.",
     "orders.row.number": "🧾 سفارش <code>{number}</code>",
@@ -907,6 +981,23 @@ CATALOG: dict[str, str] = {
     "radm.block_confirm": "آیا مطمئن هستید می‌خواهید این کاربر را بلاک کنید؟",
     "radm.block_ok": "🚫 کاربر بلاک شد.",
     "radm.restrict_ok": "⚠️ کاربر محدود شد.",
+    # Enriched receipt notification + details/delete actions.
+    "notify.receipt.tracking": "کد پیگیری: {code}",
+    "notify.receipt.name": "نام: {name}",
+    "notify.receipt.method": "روش پرداخت: {method}",
+    "notify.receipt.wallet": "موجودی کیف پول: {amount} تومان",
+    "notify.receipt.btn.details": "📝 مشاهده جزئیات",
+    "notify.receipt.btn.delete": "🗑 حذف رسید",
+    "radm.details.title": "📝 <b>جزئیات پرداخت</b>",
+    "radm.details.order": "سفارش: {number} ({status})",
+    "radm.details.product": "محصول: {title}",
+    "radm.details.amount": "مبلغ: {amount} تومان",
+    "radm.details.method": "روش پرداخت: {method}",
+    "radm.details.tracking": "کد پیگیری: {code}",
+    "radm.details.user": "کاربر: {name} ({username}) — {tg_id}",
+    "radm.details.wallet": "موجودی کیف پول: {amount} تومان",
+    "radm.details.time": "زمان ثبت رسید: {time}",
+    "radm.receipt_deleted": "🗑 رسید حذف شد. کاربر می‌تواند رسید جدید ارسال کند.",
     "radm.viewuser.title": "👤 <b>اطلاعات کاربر</b>",
     "radm.viewuser.user": "کاربر: {username} (<code>{tg_id}</code>)",
     "radm.viewuser.wallet": "موجودی: {amount} تومان",

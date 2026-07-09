@@ -46,20 +46,30 @@ async def _recipients() -> list[int | str]:
 
 
 def _build_text(order, payment, product, user, lang: str) -> str:
-    username = user.username or user.first_name or "—"
+    username = ("@" + user.username) if user.username else "—"
+    full_name = " ".join(filter(None, [user.first_name, user.last_name])) or "—"
     submitted = payment.submitted_at.strftime("%Y-%m-%d %H:%M") if payment.submitted_at else "—"
+    method_key = f"order.method.{order.payment_method}"
+    method = t(method_key, lang)
+    if method == method_key:
+        method = t("order.method.unknown", lang)
+    tracking = (payment.tracking_code or "—") if payment is not None else "—"
+    balance = f"{int(user.wallet_balance or 0):,}"
     return "\n".join([
         t("notify.receipt.title", lang),
         "",
         t("notify.receipt.order", lang, number=order.order_number),
+        t("notify.receipt.tracking", lang, code=tracking),
         t("notify.receipt.user", lang, username=username, tg_id=user.telegram_id or "—"),
+        t("notify.receipt.name", lang, name=full_name),
         t("notify.receipt.product", lang, title=product.title,
           type=t(f"product.type.{product.type}", lang)),
+        t("notify.receipt.method", lang, method=method),
         t("notify.receipt.amount", lang, amount=f"{order.final_amount:,}"),
+        t("notify.receipt.wallet", lang, amount=balance),
         t("notify.receipt.time", lang, time=submitted),
         "",
         t("notify.receipt.review_panel", lang),
-        t("notify.receipt.next_phase", lang),
     ])
 
 
