@@ -161,6 +161,12 @@ CATALOG: dict[str, str] = {
         "برای همگام‌سازی، به پنل وب مدیریت بروید، سرور را باز کنید و روی «همگام‌سازی اینباندها» بزنید.\n\n"
         "سپس دوباره از ربات، محصول V2Ray بسازید."
     ),
+    "products.v2ray.auto_inbound": (
+        "✅ فقط یک اینباند فعال پیدا شد و برای محصول انتخاب شد: {inbound}"
+    ),
+    "products.v2ray.syncing": "⏳ در حال همگام‌سازی اینباندها…",
+    "products.v2ray.sync_done": "✅ {count} اینباند همگام‌سازی شد.",
+    "products.v2ray.sync_failed": "❌ همگام‌سازی ناموفق بود: {message}",
     "products.v2ray.sync_btn": "🔄 همگام‌سازی اینباندها",
     "products.v2ray.other_server_btn": "🧩 انتخاب سرور دیگر",
     "products.v2ray.cancel_btn": "❌ انصراف",
@@ -247,6 +253,9 @@ CATALOG: dict[str, str] = {
     "web.products.form.no_servers": "هیچ سرور فعالی وجود ندارد؛ ابتدا یک سرور اضافه کنید.",
     "web.products.form.xui_inbound": "اینباند",
     "web.products.form.pick_inbound": "— انتخاب اینباند —",
+    "web.products.form.pick_server_first": "ابتدا سرور 3X-UI را انتخاب کنید.",
+    "web.products.form.no_synced_inbounds": "برای این سرور هنوز اینباندی همگام‌سازی نشده است.",
+    "web.products.form.sync_inbounds_link": "همگام‌سازی اینباندها",
     "web.products.saved": "ذخیره شد.",
     "web.products.not_saved": "ذخیره نشد: {error}",
     "web.products.toggle_active": "فعال/غیرفعال",
@@ -322,6 +331,17 @@ CATALOG: dict[str, str] = {
     "xui.test.ok": "✅ اتصال برقرار شد.",
     "xui.test.fail": "❌ اتصال ناموفق: {message}",
     "xui.sync.ok": "✅ {count} اینباند همگام‌سازی شد.",
+    "xui.sync.detail": (
+        "✅ همگام‌سازی شد — کل: {total} | جدید: {created} | "
+        "بروزرسانی: {updated} | غیرفعال: {disabled}"
+    ),
+    "xui.sync.all_btn": "🔄 همگام‌سازی همه سرورها",
+    "xui.sync.report_title": "🔄 <b>گزارش همگام‌سازی 3X-UI</b>",
+    "xui.sync.report_ok": (
+        "✅ {name} — کل: {total} | جدید: {created} | بروزرسانی: {updated} | غیرفعال: {disabled}"
+    ),
+    "xui.sync.report_fail": "❌ {name} — خطا: {message}",
+    "xui.sync.no_servers": "هیچ سرور فعالی برای همگام‌سازی وجود ندارد.",
     "xui.not_authorized": "⛔️ شما مجاز به مدیریت سرورها نیستید.",
 
     # --- bot: admin servers ------------------------------------------------------
@@ -431,24 +451,30 @@ CATALOG: dict[str, str] = {
     "web.xui.servers.form.save": "ذخیره",
     "web.xui.servers.form.cancel": "انصراف",
     "web.xui.inbounds.title": "اینباندهای {name}",
-    "web.xui.inbounds.subtitle": "اینباندهای این سرور که محصولات V2Ray می‌توانند به آن‌ها متصل شوند.",
+    "web.xui.inbounds.subtitle": "اینباندهای همگام‌شده از پنل 3X-UI. محصولات V2Ray فقط به همین‌ها متصل می‌شوند؛ افزودن دستی لازم نیست.",
     "web.xui.inbounds.saved": "ذخیره شد.",
     "web.xui.inbounds.not_saved": "ذخیره نشد: {error}",
     "web.xui.inbounds.add": "افزودن اینباند",
+    "web.xui.inbounds.sync_from_panel": "همگام‌سازی از پنل",
+    "web.xui.inbounds.last_sync": "آخرین همگام‌سازی: {when}",
     "web.xui.inbounds.back": "بازگشت به سرورها",
-    "web.xui.inbounds.empty": "هنوز اینباندی وجود ندارد — دستی اضافه کنید یا همگام‌سازی کنید.",
+    "web.xui.inbounds.empty": "هنوز اینباندی همگام‌سازی نشده — روی «همگام‌سازی از پنل» بزنید.",
     "web.xui.inbounds.col.inbound_id": "شناسه اینباند",
     "web.xui.inbounds.col.remark": "توضیح",
     "web.xui.inbounds.col.protocol": "پروتکل",
     "web.xui.inbounds.col.port": "پورت",
     "web.xui.inbounds.col.network": "شبکه",
     "web.xui.inbounds.col.security": "امنیت",
-    "web.xui.inbounds.col.active": "فعال",
+    "web.xui.inbounds.col.panel": "پنل",
+    "web.xui.inbounds.col.active": "فروش",
+    "web.xui.inbounds.col.synced": "همگام‌سازی",
     "web.xui.inbounds.col.actions": "عملیات",
     "web.xui.inbounds.on": "روشن",
     "web.xui.inbounds.off": "خاموش",
     "web.xui.inbounds.edit": "ویرایش",
-    "web.xui.inbounds.deactivate": "غیرفعال‌سازی",
+    "web.xui.inbounds.activate": "فعال‌سازی برای فروش",
+    "web.xui.inbounds.deactivate": "حذف از فروش",
+    "web.xui.inbounds.raw": "جزئیات خام (JSON)",
     "web.xui.inbounds.form.create_title": "اینباند جدید",
     "web.xui.inbounds.form.edit_title": "ویرایش اینباند",
     "web.xui.inbounds.form.inbound_id": "شناسه اینباند (روی پنل)",
@@ -857,6 +883,7 @@ CATALOG: dict[str, str] = {
     "purchase.not_configured": "پرداخت کارت‌به‌کارت هنوز توسط مدیریت تنظیم نشده است.",
     "purchase.product_unavailable": "این محصول در دسترس نیست.",
     "purchase.product_misconfigured": "این محصول هنوز به‌طور کامل پیکربندی نشده است. لطفاً بعداً تلاش کنید.",
+    "purchase.product_inbound_invalid": "محصول به اینباند معتبر متصل نیست. لطفاً با پشتیبانی تماس بگیرید.",
     "purchase.invalid_price": "قیمت این محصول تنظیم نشده است.",
     "purchase.error": "امکان ثبت سفارش نبود: {error}",
     "purchase.instructions_title": "🧾 <b>سفارش شما ثبت شد</b>",

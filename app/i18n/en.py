@@ -161,6 +161,12 @@ CATALOG: dict[str, str] = {
         "Open the web admin panel, open the server, and press “Sync inbounds”.\n\n"
         "Then create the V2Ray product from the bot again."
     ),
+    "products.v2ray.auto_inbound": (
+        "✅ Only one active inbound was found and selected for the product: {inbound}"
+    ),
+    "products.v2ray.syncing": "⏳ Syncing inbounds…",
+    "products.v2ray.sync_done": "✅ Synced {count} inbound(s).",
+    "products.v2ray.sync_failed": "❌ Sync failed: {message}",
     "products.v2ray.sync_btn": "🔄 Sync inbounds",
     "products.v2ray.other_server_btn": "🧩 Choose another server",
     "products.v2ray.cancel_btn": "❌ Cancel",
@@ -247,6 +253,9 @@ CATALOG: dict[str, str] = {
     "web.products.form.no_servers": "No active servers yet — add one first.",
     "web.products.form.xui_inbound": "Inbound",
     "web.products.form.pick_inbound": "— pick an inbound —",
+    "web.products.form.pick_server_first": "Choose a 3X-UI server first.",
+    "web.products.form.no_synced_inbounds": "No inbounds have been synced for this server yet.",
+    "web.products.form.sync_inbounds_link": "Sync inbounds",
     "web.products.saved": "Saved.",
     "web.products.not_saved": "Not saved: {error}",
     "web.products.toggle_active": "Activate/Deactivate",
@@ -322,6 +331,17 @@ CATALOG: dict[str, str] = {
     "xui.test.ok": "✅ Connected.",
     "xui.test.fail": "❌ Connection failed: {message}",
     "xui.sync.ok": "✅ Synced {count} inbound(s).",
+    "xui.sync.detail": (
+        "✅ Synced — total: {total} | new: {created} | "
+        "updated: {updated} | disabled: {disabled}"
+    ),
+    "xui.sync.all_btn": "🔄 Sync all servers",
+    "xui.sync.report_title": "🔄 <b>3X-UI sync report</b>",
+    "xui.sync.report_ok": (
+        "✅ {name} — total: {total} | new: {created} | updated: {updated} | disabled: {disabled}"
+    ),
+    "xui.sync.report_fail": "❌ {name} — error: {message}",
+    "xui.sync.no_servers": "No active server to sync.",
     "xui.not_authorized": "⛔️ You are not authorized to manage servers.",
 
     # --- bot: admin servers ------------------------------------------------------
@@ -431,24 +451,30 @@ CATALOG: dict[str, str] = {
     "web.xui.servers.form.save": "Save",
     "web.xui.servers.form.cancel": "Cancel",
     "web.xui.inbounds.title": "Inbounds of {name}",
-    "web.xui.inbounds.subtitle": "Inbounds on this server that V2Ray products can bind to.",
+    "web.xui.inbounds.subtitle": "Inbounds synced from the 3X-UI panel. V2Ray products bind only to these — no manual entry needed.",
     "web.xui.inbounds.saved": "Saved.",
     "web.xui.inbounds.not_saved": "Not saved: {error}",
     "web.xui.inbounds.add": "Add inbound",
+    "web.xui.inbounds.sync_from_panel": "Sync from panel",
+    "web.xui.inbounds.last_sync": "Last sync: {when}",
     "web.xui.inbounds.back": "Back to servers",
-    "web.xui.inbounds.empty": "No inbounds yet — add one manually or sync.",
+    "web.xui.inbounds.empty": "No inbounds synced yet — press “Sync from panel”.",
     "web.xui.inbounds.col.inbound_id": "Inbound ID",
     "web.xui.inbounds.col.remark": "Remark",
     "web.xui.inbounds.col.protocol": "Protocol",
     "web.xui.inbounds.col.port": "Port",
     "web.xui.inbounds.col.network": "Network",
     "web.xui.inbounds.col.security": "Security",
-    "web.xui.inbounds.col.active": "Active",
+    "web.xui.inbounds.col.panel": "Panel",
+    "web.xui.inbounds.col.active": "For sale",
+    "web.xui.inbounds.col.synced": "Synced",
     "web.xui.inbounds.col.actions": "Actions",
     "web.xui.inbounds.on": "on",
     "web.xui.inbounds.off": "off",
     "web.xui.inbounds.edit": "Edit",
-    "web.xui.inbounds.deactivate": "Deactivate",
+    "web.xui.inbounds.activate": "Enable for sale",
+    "web.xui.inbounds.deactivate": "Remove from sale",
+    "web.xui.inbounds.raw": "Raw details (JSON)",
     "web.xui.inbounds.form.create_title": "New inbound",
     "web.xui.inbounds.form.edit_title": "Edit inbound",
     "web.xui.inbounds.form.inbound_id": "Inbound ID (on the panel)",
@@ -857,6 +883,7 @@ CATALOG: dict[str, str] = {
     "purchase.not_configured": "Card-to-card payment has not been configured by the admin yet.",
     "purchase.product_unavailable": "This product is not available.",
     "purchase.product_misconfigured": "This product is not fully configured yet. Please try again later.",
+    "purchase.product_inbound_invalid": "This product is not linked to a valid inbound. Please contact support.",
     "purchase.invalid_price": "This product has no valid price.",
     "purchase.error": "Could not create the order: {error}",
     "purchase.instructions_title": "🧾 <b>Your order was created</b>",

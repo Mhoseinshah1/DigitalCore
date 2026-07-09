@@ -11,11 +11,14 @@
 {% if error %}<div class="alert error">{{ _("web.xui.inbounds.not_saved", error=error) }}</div>{% endif %}
 
 <p>
-  <a class="btn primary" href="/admin/xui-servers/{{ server.id }}/inbounds/create">➕ {{ _("web.xui.inbounds.add") }}</a>
-  <a class="btn" href="/admin/xui-servers">{{ _("web.xui.inbounds.back") }}</a>
   <form method="post" action="/admin/xui-servers/{{ server.id }}/sync-inbounds" style="display:inline">
-    <button type="submit" class="btn">🔄 {{ _("web.xui.servers.sync") }}</button>
+    <input type="hidden" name="next" value="inbounds">
+    <button type="submit" class="btn primary">🔄 {{ _("web.xui.inbounds.sync_from_panel") }}</button>
   </form>
+  <a class="btn" href="/admin/xui-servers">{{ _("web.xui.inbounds.back") }}</a>
+  {% if server.last_health_check %}
+  <span class="muted">{{ _("web.xui.inbounds.last_sync", when=server.last_health_check.strftime("%Y-%m-%d %H:%M")) }}</span>
+  {% endif %}
 </p>
 
 {% if not inbounds %}
@@ -32,7 +35,9 @@
           <th>{{ _("web.xui.inbounds.col.port") }}</th>
           <th>{{ _("web.xui.inbounds.col.network") }}</th>
           <th>{{ _("web.xui.inbounds.col.security") }}</th>
+          <th>{{ _("web.xui.inbounds.col.panel") }}</th>
           <th>{{ _("web.xui.inbounds.col.active") }}</th>
+          <th>{{ _("web.xui.inbounds.col.synced") }}</th>
           <th>{{ _("web.xui.inbounds.col.actions") }}</th>
         </tr>
       </thead>
@@ -40,24 +45,44 @@
         {% for ib in inbounds %}
         <tr>
           <td>{{ ib.inbound_id }}</td>
-          <td>{{ ib.remark or "—" }}</td>
+          <td>{{ ib.remark or ib.tag or "—" }}</td>
           <td>{{ ib.protocol or "—" }}</td>
           <td>{{ ib.port or "—" }}</td>
           <td>{{ ib.network or "—" }}</td>
           <td>{{ ib.security or "—" }}</td>
           <td>
+            {% if ib.enable_from_panel %}<span class="pill ok">{{ _("web.xui.inbounds.on") }}</span>
+            {% else %}<span class="pill">{{ _("web.xui.inbounds.off") }}</span>{% endif %}
+          </td>
+          <td>
             {% if ib.is_active %}<span class="pill ok">{{ _("web.xui.inbounds.on") }}</span>
             {% else %}<span class="pill">{{ _("web.xui.inbounds.off") }}</span>{% endif %}
           </td>
+          <td class="muted">
+            {% if ib.synced_at %}{{ ib.synced_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}
+          </td>
           <td class="actions">
-            <a class="btn small" href="/admin/xui-inbounds/{{ ib.id }}/edit">{{ _("web.xui.inbounds.edit") }}</a>
             {% if ib.is_active %}
             <form method="post" action="/admin/xui-inbounds/{{ ib.id }}/deactivate">
               <button type="submit" class="btn small danger">{{ _("web.xui.inbounds.deactivate") }}</button>
             </form>
+            {% else %}
+            <form method="post" action="/admin/xui-inbounds/{{ ib.id }}/activate">
+              <button type="submit" class="btn small">{{ _("web.xui.inbounds.activate") }}</button>
+            </form>
             {% endif %}
           </td>
         </tr>
+        {% if ib.raw_json %}
+        <tr class="detail-row">
+          <td colspan="10">
+            <details>
+              <summary class="muted">{{ _("web.xui.inbounds.raw") }}</summary>
+              <pre class="code-block">{{ ib.raw_json }}</pre>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>

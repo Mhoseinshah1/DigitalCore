@@ -47,6 +47,9 @@ SleepFn = Callable[[float], Awaitable[None]]
 PATH_LOGIN = "/login"
 PATH_SERVER_STATUS = "/panel/api/server/status"
 PATH_INBOUND_LIST = "/panel/api/inbounds/list"
+# Some panel builds/versions expose the list at the collection root instead of
+# /list; tried as a fallback when /list 404s. Both are centralised here.
+PATH_INBOUND_LIST_ALT = "/panel/api/inbounds"
 PATH_INBOUND_GET = "/panel/api/inbounds/get/{inbound_id}"
 PATH_INBOUND_ALL_LINKS = "/panel/api/inbounds/allLinks"
 # First-class client endpoints (newer API) — tried first.
@@ -281,8 +284,19 @@ class SanaeiApiClient:
 
     # -- inbounds ------------------------------------------------------------
     async def list_inbounds(self) -> list[dict[str, Any]]:
-        obj = await self._request("GET", PATH_INBOUND_LIST)
-        return list(obj) if isinstance(obj, list) else []
+        """Every inbound on the panel, as raw dicts.
+
+        Tries ``/panel/api/inbounds/list`` then falls back to
+        ``/panel/api/inbounds`` for panel builds that expose it there. The
+        ``{success, msg, obj}`` envelope is already unwrapped by ``_request``;
+        the returned ``obj`` may itself be a list or a wrapper dict
+        (``{"list": [...]}`` / ``{"inbounds": [...]}``), so we coerce safely.
+        """
+        try:
+            obj = await self._request("GET", PATH_INBOUND_LIST)
+        except XuiNotFoundError:
+            obj = await self._request("GET", PATH_INBOUND_LIST_ALT)
+        return _coerce_inbound_list(obj)
 
     async def get_inbound(self, inbound_id: int) -> dict[str, Any]:
         obj = await self._request("GET", PATH_INBOUND_GET.format(inbound_id=inbound_id))
@@ -390,6 +404,23 @@ class SanaeiApiClient:
 def _redact(path: str) -> str:
     """Drop an email/identifier tail so a client id never lands in logs."""
     return path.rsplit("/", 1)[0] + "/…" if path.count("/") > 3 else path
+
+
+def _coerce_inbound_list(obj: Any) -> list[dict[str, Any]]:
+    """Normalise an inbounds payload to a list of inbound dicts.
+
+    Handles the response being a bare list, or a wrapper object that carries the
+    list under a ``list``/``inbounds``/``obj``/``data`` key (varies by panel
+    version). Non-dict entries are dropped so the caller never sees junk.
+    """
+    if isinstance(obj, list):
+        return [x for x in obj if isinstance(x, dict)]
+    if isinstance(obj, dict):
+        for key in ("list", "inbounds", "obj", "data"):
+            inner = obj.get(key)
+            if isinstance(inner, list):
+                return [x for x in inner if isinstance(x, dict)]
+    return []
 
 
 def _dig(d: Any, *keys: str) -> Any:

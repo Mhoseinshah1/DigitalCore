@@ -56,8 +56,17 @@ sync-inbounds** are best-effort and never block CRUD or product binding.
 | Area | Routes |
 |------|--------|
 | Servers | `GET /admin/xui-servers`, `/admin/xui-servers/create`, `/admin/xui-servers/{id}/edit`, `POST …/{id}/{deactivate,test,sync-inbounds}` |
-| Inbounds | `GET /admin/xui-servers/{id}/inbounds`, `…/inbounds/create`, `GET /admin/xui-inbounds/{id}/edit`, `POST /admin/xui-inbounds/{id}/{edit,deactivate}`, `GET /admin/xui-inbounds` (overview) |
+| Inbounds | `GET /admin/xui-servers/{id}/inbounds` (synced list + «Sync from panel»), `POST /admin/xui-inbounds/{id}/{activate,deactivate}` (local sale toggle), `GET /admin/xui-inbounds` (overview) |
 | Product binding | `GET /admin/api/xui-servers/{id}/inbounds` (JSON, active only) feeds the type-aware product form |
+
+**Auto-sync (admins never type inbound IDs).** Inbounds are discovered from the
+panel by `app/services/xui_inbound_sync_service.py` (`sync_server_inbounds` /
+`sync_all_active_servers`), which upserts by `(server_id, remote inbound id)`,
+never deletes, marks vanished inbounds inactive, and stores each inbound's raw
+JSON. Testing a server auto-syncs it; the admin bot exposes `/xui_sync` and a
+«🔄 Sync all servers» button; the product-add bot flow syncs on demand and
+auto-selects a lone inbound. The manual add/edit inbound forms were removed — the
+web `POST …/inbounds/create` remains only for scripted seeding.
 
 Validation (`app/services/product_service.py`): a `license` product must not set
 a server/inbound; a `v2ray` product **requires** duration, traffic, a server and
